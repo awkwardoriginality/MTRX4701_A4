@@ -24,29 +24,10 @@ class CheckersPerceptionNode(Node):
         self.bag_path = self.get_parameter("bag_path").value
         self.image_topic = self.get_parameter("image_topic").value
 
-        self.board_pub = self.create_publisher(
-            Int32MultiArray,
-            "/checkers/board_state",
-            10
-        )
-
-        self.blocked_pub = self.create_publisher(
-            Bool,
-            "/checkers/board_blocked",
-            10
-        )
-
-        self.debug_pub = self.create_publisher(
-            Image,
-            "/checkers/warped_view",
-            10
-        )
-
-        self.outline_pub = self.create_publisher(
-            Image,
-            "/checkers/board_outline",
-            10
-        )
+        self.board_pub = self.create_publisher(Int32MultiArray, "/checkers/board_state", 10)
+        self.blocked_pub = self.create_publisher(Bool, "/checkers/board_blocked", 10)
+        self.debug_pub = self.create_publisher(Image, "/checkers/warped_view", 10)
+        self.outline_pub = self.create_publisher(Image, "/checkers/board_outline", 10)
 
         self.TOP_LEFT_ID = 1
         self.TOP_RIGHT_ID = 3
@@ -56,14 +37,16 @@ class CheckersPerceptionNode(Node):
         self.output_size = 800
         self.cell_size = self.output_size // 8
 
+        # Secondary stability check
         self.stable_required_frames = 8
         self.last_board = None
         self.stable_count = 0
         self.last_published_board = None
 
-        self.aruco_dict = cv2.aruco.getPredefinedDictionary(
-            cv2.aruco.DICT_4X4_50
-        )
+        # Primary checkerboard visibility check
+        self.chessboard_pattern_size = (7, 7)
+
+        self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
         self.aruco_params = cv2.aruco.DetectorParameters_create()
 
         if self.input_mode == "ros":
@@ -121,15 +104,36 @@ class CheckersPerceptionNode(Node):
         self.process_frame(frame)
 
     def process_frame(self, frame):
-        warped, blocked, outline_img = self.get_warped_board(frame)
+        warped, outline_img = self.get_warped_board(frame)
 
         if outline_img is not None:
             self.publish_outline(outline_img)
 
-        if blocked or warped is None:
+        if warped is None:
+            self.publish_blocked(True)
+            return
+
+        board_clear, corner_debug = self.check_chessboard_visible(warped)
+
+        if not board_clear:
+            self.publish_blocked(True)
+            self.publish_debug(corner_debug)
+            self.stable_count = 0
+            self.last_board = None
             return
 
         board, debug_img = self.classify_board(warped)
+
+        cv2.putText(
+            debug_img,
+            f"CHESSBOARD CLEAR | STABLE {self.stable_count}/{self.stable_required_frames}",
+            (20, 35),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 255, 0),
+            2
+        )
+
         self.publish_debug(debug_img)
 
         if self.last_board is not None and np.array_equal(board, self.last_board):
@@ -146,6 +150,100 @@ class CheckersPerceptionNode(Node):
                 self.last_published_board = board.copy()
                 self.get_logger().info(f"Published board:\n{board}")
 
+    def check_chessboard_visible(self, warped):
+        debug = warped.copy()
+
+        gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
+
+        # Improve checkerboard contrast slightly
+        gray = cv2.GaussianBlur(gray, (3, 3), 0)
+        gray = cv2.equalizeHist(gray)
+
+        found = False
+        corners = None
+
+        # More robust newer OpenCV method
+        if hasattr(cv2, "findChessboardCornersSB"):
+            flags_sb = (
+                cv2.CALIB_CB_NORMALIZE_IMAGE |
+                cv2.CALIB_CB_EXHAUSTIVE |
+                cv2.CALIB_CB_ACCURACY
+            )
+
+            found, corners = cv2.findChessboardCornersSB(
+                gray,
+                self.chessboard_pattern_size,
+                flags_sb
+            )
+
+        # Fallback older method
+        if not found:
+            flags = (
+                cv2.CALIB_CB_ADAPTIVE_THRESH |
+                cv2.CALIB_CB_NORMALIZE_IMAGE |
+                cv2.CALIB_CB_FILTER_QUADS
+            )
+
+            found, corners = cv2.findChessboardCorners(
+                gray,
+                self.chessboard_pattern_size,
+                flags
+            )
+
+            if found:
+                criteria = (
+                    cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
+                    30,
+                    0.001
+                )
+
+                corners = cv2.cornerSubPix(
+                    gray,
+                    corners,
+                    (11, 11),
+                    (-1, -1),
+                    criteria
+                )
+
+        if found and corners is not None and len(corners) == 49:
+            cv2.drawChessboardCorners(
+                debug,
+                self.chessboard_pattern_size,
+                corners,
+                found
+            )
+
+            cv2.putText(
+                debug,
+                "BOARD CLEAR: CHESSBOARD 49/49",
+                (20, 35),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.9,
+                (0, 255, 0),
+                2
+            )
+
+            return True, debug
+
+        # If full chessboard is not detected, draw expected inner grid points for debugging only
+        for r in range(1, 8):
+            for c in range(1, 8):
+                x = int(c * self.cell_size)
+                y = int(r * self.cell_size)
+                cv2.circle(debug, (x, y), 7, (0, 0, 255), -1)
+
+        cv2.putText(
+            debug,
+            "BOARD BLOCKED: CHESSBOARD NOT FOUND",
+            (20, 35),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.9,
+            (0, 0, 255),
+            2
+        )
+
+        return False, debug
+
     def get_warped_board(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -158,7 +256,7 @@ class CheckersPerceptionNode(Node):
         outline_img = frame.copy()
 
         if ids is None:
-            return None, True, outline_img
+            return None, outline_img
 
         ids = ids.flatten()
 
@@ -170,7 +268,7 @@ class CheckersPerceptionNode(Node):
         ]
 
         if not all(tag_id in ids for tag_id in required_ids):
-            return None, True, outline_img
+            return None, outline_img
 
         tag_corners = {}
         tag_centres = {}
@@ -236,7 +334,7 @@ class CheckersPerceptionNode(Node):
         H = cv2.getPerspectiveTransform(src_pts, dst_pts)
         warped = cv2.warpPerspective(frame, H, (self.output_size, self.output_size))
 
-        return warped, False, outline_img
+        return warped, outline_img
 
     def classify_board(self, warped):
         hsv = cv2.cvtColor(warped, cv2.COLOR_BGR2HSV)
