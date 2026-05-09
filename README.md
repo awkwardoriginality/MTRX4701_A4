@@ -4,14 +4,28 @@
 # To launch realsense camera and publish it as a ros topic
 ros2 launch realsense2_camera rs_launch.py
 
-# To run the perception node
+# To run the perception node with a realsense bag
 ros2 run perception checkers_perception --ros-args -p input_mode:=bag -p bag_path:=/home/eashan-garg/checkers.bag
 
-# To open the camera visualiser
+# To run the perception node with live camera feed
+ros2 run perception checkers_perception --ros-args \
+-p input_mode:=ros \
+-p image_topic:=/camera/color/image_raw
+
+# To open the camera visualiser to record a bag
 realsense-viewer
 
 # To see the camera feed in ros2
 ros2 run rqt_image_view rqt_image_view
+
+# To run the game state machine
+ros2 run game_engine game_controller
+
+# To echo the game status
+ros2 topic echo /game/status
+
+# To publish an arm movement complete message for testing purposes
+ros2 topic pub /game/robot_done std_msgs/msg/Bool "{data: true}" --once
 
 
 Camera image
@@ -21,15 +35,3 @@ Camera image
 → if chessboard not found: publish blocked=True
 → if found: classify green/purple pieces
 → if same board for 8 frames: publish blocked=False and publish board state
-
-
-game controller sequence
-
-1. save the initial state / previous state of board by waiting until blocked = false
-2. Tell the user ready to play. Make your move.
-
-State machine 1: if blocked = true. Wait
-                 if blocked = false and previous state = current state. Wait
-                 if blocked = false and previous state != current state. Continue
-
-3. Robot makes its move

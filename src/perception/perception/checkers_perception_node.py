@@ -37,13 +37,11 @@ class CheckersPerceptionNode(Node):
         self.output_size = 800
         self.cell_size = self.output_size // 8
 
-        # Secondary stability check
         self.stable_required_frames = 8
         self.last_board = None
         self.stable_count = 0
         self.last_published_board = None
 
-        # Primary checkerboard visibility check
         self.chessboard_pattern_size = (7, 7)
 
         self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
@@ -103,6 +101,32 @@ class CheckersPerceptionNode(Node):
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
         self.process_frame(frame)
 
+    def draw_detected_checkerboard_corners(self, img, corners):
+        if corners is None:
+            return img
+
+        out = img.copy()
+        corners = corners.reshape(-1, 2)
+
+        for i, p in enumerate(corners):
+            x = int(round(p[0]))
+            y = int(round(p[1]))
+
+            cv2.circle(out, (x, y), 9, (255, 255, 0), -1)
+            cv2.circle(out, (x, y), 13, (0, 0, 0), 2)
+
+            cv2.putText(
+                out,
+                str(i),
+                (x + 9, y - 9),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                (255, 255, 0),
+                2
+            )
+
+        return out
+
     def process_frame(self, frame):
         warped, outline_img = self.get_warped_board(frame)
 
@@ -113,7 +137,7 @@ class CheckersPerceptionNode(Node):
             self.publish_blocked(True)
             return
 
-        board_clear, corner_debug = self.check_chessboard_visible(warped)
+        board_clear, corner_debug, detected_corners = self.check_chessboard_visible(warped)
 
         if not board_clear:
             self.publish_blocked(True)
@@ -123,6 +147,27 @@ class CheckersPerceptionNode(Node):
             return
 
         board, debug_img = self.classify_board(warped)
+
+        # Draw detected checkerboard inner corners on final rqt display
+        cv2.drawChessboardCorners(
+            debug_img,
+            self.chessboard_pattern_size,
+            detected_corners,
+            True
+        )
+
+        for i, corner in enumerate(detected_corners):
+            x, y = corner.ravel().astype(int)
+            cv2.circle(debug_img, (x, y), 5, (255, 0, 255), -1)
+            cv2.putText(
+                debug_img,
+                str(i),
+                (x + 5, y - 5),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.35,
+                (255, 0, 255),
+                1
+            )
 
         cv2.putText(
             debug_img,
@@ -155,14 +200,12 @@ class CheckersPerceptionNode(Node):
 
         gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 
-        # Improve checkerboard contrast slightly
         gray = cv2.GaussianBlur(gray, (3, 3), 0)
         gray = cv2.equalizeHist(gray)
 
         found = False
         corners = None
 
-        # More robust newer OpenCV method
         if hasattr(cv2, "findChessboardCornersSB"):
             flags_sb = (
                 cv2.CALIB_CB_NORMALIZE_IMAGE |
@@ -176,7 +219,6 @@ class CheckersPerceptionNode(Node):
                 flags_sb
             )
 
-        # Fallback older method
         if not found:
             flags = (
                 cv2.CALIB_CB_ADAPTIVE_THRESH |
@@ -213,6 +255,19 @@ class CheckersPerceptionNode(Node):
                 found
             )
 
+            for i, corner in enumerate(corners):
+                x, y = corner.ravel().astype(int)
+                cv2.circle(debug, (x, y), 5, (255, 0, 255), -1)
+                cv2.putText(
+                    debug,
+                    str(i),
+                    (x + 5, y - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.35,
+                    (255, 0, 255),
+                    1
+                )
+
             cv2.putText(
                 debug,
                 "BOARD CLEAR: CHESSBOARD 49/49",
@@ -223,9 +278,8 @@ class CheckersPerceptionNode(Node):
                 2
             )
 
-            return True, debug
+            return True, debug, corners
 
-        # If full chessboard is not detected, draw expected inner grid points for debugging only
         for r in range(1, 8):
             for c in range(1, 8):
                 x = int(c * self.cell_size)
@@ -242,7 +296,7 @@ class CheckersPerceptionNode(Node):
             2
         )
 
-        return False, debug
+        return False, debug, None
 
     def get_warped_board(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
