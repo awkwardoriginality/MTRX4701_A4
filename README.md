@@ -5,12 +5,12 @@
 ros2 launch realsense2_camera rs_launch.py
 
 # To run the perception node with a realsense bag
-ros2 run perception checkers_perception --ros-args -p input_mode:=bag -p bag_path:=/home/eashan-garg/checkers.bag
+ros2 run perception checkers_perception --ros-args -p input_mode:=bag -p bag_path:=/home/eashan-garg/checkers1.bag
 
 # To run the perception node with live camera feed
 ros2 run perception checkers_perception --ros-args \
 -p input_mode:=ros \
--p image_topic:=/camera/color/image_raw
+-p image_topic:=/camera/camera/color/image_raw
 
 # To open the camera visualiser to record a bag
 realsense-viewer

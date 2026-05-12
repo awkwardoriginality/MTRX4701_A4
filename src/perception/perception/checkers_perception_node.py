@@ -29,10 +29,10 @@ class CheckersPerceptionNode(Node):
         self.debug_pub = self.create_publisher(Image, "/checkers/warped_view", 10)
         self.outline_pub = self.create_publisher(Image, "/checkers/board_outline", 10)
 
-        self.TOP_LEFT_ID = 1
-        self.TOP_RIGHT_ID = 3
-        self.BOTTOM_RIGHT_ID = 0
-        self.BOTTOM_LEFT_ID = 2
+        self.TOP_LEFT_ID = 0
+        self.TOP_RIGHT_ID = 2
+        self.BOTTOM_RIGHT_ID = 3
+        self.BOTTOM_LEFT_ID = 1
 
         self.output_size = 800
         self.cell_size = self.output_size // 8
@@ -396,13 +396,13 @@ class CheckersPerceptionNode(Node):
         board = np.zeros((8, 8), dtype=np.int32)
         debug_img = warped.copy()
 
-        green_lower = np.array([35, 50, 40])
-        green_upper = np.array([90, 255, 255])
+        green_lower = np.array([45, 80, 80])
+        green_upper = np.array([85, 255, 255])
 
-        purple_lower = np.array([100, 20, 20])
+        purple_lower = np.array([105, 50, 50])
         purple_upper = np.array([145, 255, 255])
 
-        min_pixels = 500
+        min_pixels = 1200
 
         for row in range(8):
             for col in range(8):
@@ -420,12 +420,19 @@ class CheckersPerceptionNode(Node):
                 green_pixels = cv2.countNonZero(green_mask)
                 purple_pixels = cv2.countNonZero(purple_mask)
 
-                if green_pixels > min_pixels and green_pixels > purple_pixels:
+                crop_area = crop.shape[0] * crop.shape[1]
+
+                green_ratio = green_pixels / crop_area
+                purple_ratio = purple_pixels / crop_area
+
+                if green_ratio > 0.18 and green_ratio > purple_ratio:
                     state = 1
                     label = "G"
-                elif purple_pixels > min_pixels and purple_pixels > green_pixels:
+
+                elif purple_ratio > 0.18 and purple_ratio > green_ratio:
                     state = 2
                     label = "P"
+
                 else:
                     state = 0
                     label = "."
