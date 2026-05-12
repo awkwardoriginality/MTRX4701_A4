@@ -47,6 +47,7 @@ class CheckersPerceptionNode(Node):
         self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
         self.aruco_params = cv2.aruco.DetectorParameters_create()
 
+        # ArUco cache
         self.last_src_pts = None
         self.last_layout_centre = None
         self.missing_aruco_count = 0
@@ -107,32 +108,6 @@ class CheckersPerceptionNode(Node):
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
         self.process_frame(frame)
 
-    def draw_detected_checkerboard_corners(self, img, corners):
-        if corners is None:
-            return img
-
-        out = img.copy()
-        corners = corners.reshape(-1, 2)
-
-        for i, p in enumerate(corners):
-            x = int(round(p[0]))
-            y = int(round(p[1]))
-
-            cv2.circle(out, (x, y), 9, (255, 255, 0), -1)
-            cv2.circle(out, (x, y), 13, (0, 0, 0), 2)
-
-            cv2.putText(
-                out,
-                str(i),
-                (x + 9, y - 9),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.45,
-                (255, 255, 0),
-                2
-            )
-
-        return out
-
     def process_frame(self, frame):
         warped, outline_img = self.get_warped_board(frame)
 
@@ -154,26 +129,12 @@ class CheckersPerceptionNode(Node):
 
         board, debug_img = self.classify_board(warped)
 
-        # Draw detected checkerboard inner corners on final rqt display
         cv2.drawChessboardCorners(
             debug_img,
             self.chessboard_pattern_size,
             detected_corners,
             True
         )
-
-        for i, corner in enumerate(detected_corners):
-            x, y = corner.ravel().astype(int)
-            cv2.circle(debug_img, (x, y), 5, (255, 0, 255), -1)
-            cv2.putText(
-                debug_img,
-                str(i),
-                (x + 5, y - 5),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.35,
-                (255, 0, 255),
-                1
-            )
 
         cv2.putText(
             debug_img,
@@ -203,7 +164,6 @@ class CheckersPerceptionNode(Node):
 
     def check_chessboard_visible(self, warped):
         debug = warped.copy()
-
         gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
 
         gray = cv2.GaussianBlur(gray, (3, 3), 0)
@@ -261,19 +221,6 @@ class CheckersPerceptionNode(Node):
                 found
             )
 
-            for i, corner in enumerate(corners):
-                x, y = corner.ravel().astype(int)
-                cv2.circle(debug, (x, y), 5, (255, 0, 255), -1)
-                cv2.putText(
-                    debug,
-                    str(i),
-                    (x + 5, y - 5),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.35,
-                    (255, 0, 255),
-                    1
-                )
-
             cv2.putText(
                 debug,
                 "BOARD CLEAR: CHESSBOARD 49/49",
@@ -307,7 +254,7 @@ class CheckersPerceptionNode(Node):
     def get_warped_board(self, frame):
         h, w = frame.shape[:2]
 
-        # Crop around the board/table area
+        # Crop around board area. Adjust these if board is not centred.
         x1 = int(w * 0.28)
         x2 = int(w * 0.72)
         y1 = int(h * 0.18)
@@ -315,7 +262,7 @@ class CheckersPerceptionNode(Node):
 
         roi = frame[y1:y2, x1:x2]
 
-        # Digital zoom for ArUco detection and rqt display
+        # Zoomed view used for ArUco detection and rqt outline display
         scale = 2.0
         roi_big = cv2.resize(
             roi,
@@ -325,19 +272,14 @@ class CheckersPerceptionNode(Node):
             interpolation=cv2.INTER_LINEAR
         )
 
-        gray = cv2.cvtColor(roi_big, cv2.COLOR_BGR2GRAY)
         outline_img = roi_big.copy()
+        gray = cv2.cvtColor(roi_big, cv2.COLOR_BGR2GRAY)
 
         corners, ids, _ = cv2.aruco.detectMarkers(
             gray,
             self.aruco_dict,
             parameters=self.aruco_params
         )
-
-        if ids is None:
-            return None, outline_img
-
-        ids = ids.flatten()
 
         required_ids = [
             self.TOP_LEFT_ID,
@@ -346,46 +288,89 @@ class CheckersPerceptionNode(Node):
             self.BOTTOM_LEFT_ID
         ]
 
-        if not all(tag_id in ids for tag_id in required_ids):
-            return None, outline_img
+        detection_ok = False
+        using_cache = False
 
-        tag_corners = {}
-        tag_centres = {}
+        if ids is not None:
+            ids_flat = ids.flatten()
 
-        for corner, tag_id in zip(corners, ids):
-            tag_id = int(tag_id)
-            pts = corner[0].astype(np.float32)
+            if all(tag_id in ids_flat for tag_id in required_ids):
+                tag_corners = {}
+                tag_centres = {}
 
-            if tag_id in required_ids:
-                tag_corners[tag_id] = pts
-                tag_centres[tag_id] = np.mean(pts, axis=0)
+                for corner, tag_id in zip(corners, ids_flat):
+                    tag_id = int(tag_id)
+                    pts = corner[0].astype(np.float32)
 
-        layout_centre = np.mean(
-            np.array([
-                tag_centres[self.TOP_LEFT_ID],
-                tag_centres[self.TOP_RIGHT_ID],
-                tag_centres[self.BOTTOM_RIGHT_ID],
-                tag_centres[self.BOTTOM_LEFT_ID],
-            ]),
-            axis=0
-        )
+                    if tag_id in required_ids:
+                        tag_corners[tag_id] = pts
+                        tag_centres[tag_id] = np.mean(pts, axis=0)
 
-        def inner_corner(tag_id):
-            pts = tag_corners[tag_id]
-            distances = np.linalg.norm(pts - layout_centre, axis=1)
-            return pts[np.argmin(distances)]
+                layout_centre_new = np.mean(
+                    np.array([
+                        tag_centres[self.TOP_LEFT_ID],
+                        tag_centres[self.TOP_RIGHT_ID],
+                        tag_centres[self.BOTTOM_RIGHT_ID],
+                        tag_centres[self.BOTTOM_LEFT_ID],
+                    ]),
+                    axis=0
+                )
 
-        board_top_left = inner_corner(self.TOP_LEFT_ID)
-        board_top_right = inner_corner(self.TOP_RIGHT_ID)
-        board_bottom_right = inner_corner(self.BOTTOM_RIGHT_ID)
-        board_bottom_left = inner_corner(self.BOTTOM_LEFT_ID)
+                def inner_corner(tag_id):
+                    pts = tag_corners[tag_id]
+                    distances = np.linalg.norm(pts - layout_centre_new, axis=1)
+                    return pts[np.argmin(distances)]
 
-        src_pts = np.array([
-            board_top_left,
-            board_top_right,
-            board_bottom_right,
-            board_bottom_left
-        ], dtype=np.float32)
+                src_pts_new = np.array([
+                    inner_corner(self.TOP_LEFT_ID),
+                    inner_corner(self.TOP_RIGHT_ID),
+                    inner_corner(self.BOTTOM_RIGHT_ID),
+                    inner_corner(self.BOTTOM_LEFT_ID)
+                ], dtype=np.float32)
+
+                # Smooth detected board corners
+                if self.last_src_pts is None:
+                    src_pts = src_pts_new.copy()
+                    layout_centre = layout_centre_new.copy()
+                else:
+                    src_pts = (
+                        self.src_alpha * self.last_src_pts +
+                        (1.0 - self.src_alpha) * src_pts_new
+                    )
+                    layout_centre = (
+                        self.src_alpha * self.last_layout_centre +
+                        (1.0 - self.src_alpha) * layout_centre_new
+                    )
+
+                self.last_src_pts = src_pts.copy()
+                self.last_layout_centre = layout_centre.copy()
+                self.missing_aruco_count = 0
+                detection_ok = True
+
+                cv2.aruco.drawDetectedMarkers(outline_img, corners, ids)
+
+        # If detection failed, use cached board corners
+        if not detection_ok:
+            if (
+                self.last_src_pts is not None and
+                self.last_layout_centre is not None and
+                self.missing_aruco_count < self.max_missing_aruco_frames
+            ):
+                src_pts = self.last_src_pts.copy()
+                layout_centre = self.last_layout_centre.copy()
+                self.missing_aruco_count += 1
+                using_cache = True
+            else:
+                cv2.putText(
+                    outline_img,
+                    "ARUCO LOST - NO CACHE",
+                    (20, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.9,
+                    (0, 0, 255),
+                    2
+                )
+                return None, outline_img
 
         dst_pts = np.array([
             [0, 0],
@@ -394,10 +379,16 @@ class CheckersPerceptionNode(Node):
             [0, self.output_size - 1]
         ], dtype=np.float32)
 
-        cv2.aruco.drawDetectedMarkers(outline_img, corners, ids.reshape(-1, 1))
-
         outline_pts = src_pts.astype(np.int32).reshape((-1, 1, 2))
-        cv2.polylines(outline_img, [outline_pts], True, (0, 255, 0), 4)
+
+        if using_cache:
+            outline_colour = (0, 255, 255)   # yellow when cached
+            text = f"USING CACHED ARUCO {self.missing_aruco_count}/{self.max_missing_aruco_frames}"
+        else:
+            outline_colour = (0, 255, 0)     # green when live detected
+            text = "LIVE ARUCO DETECTION"
+
+        cv2.polylines(outline_img, [outline_pts], True, outline_colour, 4)
 
         for point in src_pts.astype(np.int32):
             cv2.circle(outline_img, tuple(point), 8, (0, 0, 255), -1)
@@ -410,9 +401,19 @@ class CheckersPerceptionNode(Node):
             -1
         )
 
+        cv2.putText(
+            outline_img,
+            text,
+            (20, 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            outline_colour,
+            2
+        )
+
         H = cv2.getPerspectiveTransform(src_pts, dst_pts)
 
-        # Important: warp from zoomed/cropped image, not full frame
+        # Warp from the zoomed/cropped image, not the full frame
         warped = cv2.warpPerspective(
             roi_big,
             H,
@@ -432,8 +433,6 @@ class CheckersPerceptionNode(Node):
 
         purple_lower = np.array([105, 50, 50])
         purple_upper = np.array([145, 255, 255])
-
-        min_pixels = 1200
 
         for row in range(8):
             for col in range(8):
@@ -459,11 +458,9 @@ class CheckersPerceptionNode(Node):
                 if green_ratio > 0.18 and green_ratio > purple_ratio:
                     state = 1
                     label = "G"
-
                 elif purple_ratio > 0.18 and purple_ratio > green_ratio:
                     state = 2
                     label = "P"
-
                 else:
                     state = 0
                     label = "."
