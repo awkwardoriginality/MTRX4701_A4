@@ -47,6 +47,12 @@ class CheckersPerceptionNode(Node):
         self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
         self.aruco_params = cv2.aruco.DetectorParameters_create()
 
+        self.last_src_pts = None
+        self.last_layout_centre = None
+        self.missing_aruco_count = 0
+        self.max_missing_aruco_frames = 10
+        self.src_alpha = 0.85
+
         if self.input_mode == "ros":
             self.image_sub = self.create_subscription(
                 Image,
@@ -299,15 +305,34 @@ class CheckersPerceptionNode(Node):
         return False, debug, None
 
     def get_warped_board(self, frame):
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        h, w = frame.shape[:2]
+
+        # Crop around the board/table area
+        x1 = int(w * 0.28)
+        x2 = int(w * 0.72)
+        y1 = int(h * 0.18)
+        y2 = int(h * 0.82)
+
+        roi = frame[y1:y2, x1:x2]
+
+        # Digital zoom for ArUco detection and rqt display
+        scale = 2.0
+        roi_big = cv2.resize(
+            roi,
+            None,
+            fx=scale,
+            fy=scale,
+            interpolation=cv2.INTER_LINEAR
+        )
+
+        gray = cv2.cvtColor(roi_big, cv2.COLOR_BGR2GRAY)
+        outline_img = roi_big.copy()
 
         corners, ids, _ = cv2.aruco.detectMarkers(
             gray,
             self.aruco_dict,
             parameters=self.aruco_params
         )
-
-        outline_img = frame.copy()
 
         if ids is None:
             return None, outline_img
@@ -386,7 +411,13 @@ class CheckersPerceptionNode(Node):
         )
 
         H = cv2.getPerspectiveTransform(src_pts, dst_pts)
-        warped = cv2.warpPerspective(frame, H, (self.output_size, self.output_size))
+
+        # Important: warp from zoomed/cropped image, not full frame
+        warped = cv2.warpPerspective(
+            roi_big,
+            H,
+            (self.output_size, self.output_size)
+        )
 
         return warped, outline_img
 

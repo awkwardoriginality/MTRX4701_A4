@@ -1,0 +1,21 @@
+[1.037s] Invoking command in '/home/eashan-garg/MTRX4701_A4/src/game_engine': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PYTHONPATH=/home/eashan-garg/MTRX4701_A4/build/game_engine/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/eashan-garg/MTRX4701_A4/install/game_engine/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/game_engine build --build-base /home/eashan-garg/MTRX4701_A4/build/game_engine/build install --record /home/eashan-garg/MTRX4701_A4/build/game_engine/install.log --single-version-externally-managed install_data
+[1.250s] running egg_info
+[1.260s] writing ../../build/game_engine/game_engine.egg-info/PKG-INFO
+[1.260s] writing dependency_links to ../../build/game_engine/game_engine.egg-info/dependency_links.txt
+[1.260s] writing entry points to ../../build/game_engine/game_engine.egg-info/entry_points.txt
+[1.260s] writing requirements to ../../build/game_engine/game_engine.egg-info/requires.txt
+[1.260s] writing top-level names to ../../build/game_engine/game_engine.egg-info/top_level.txt
+[1.281s] reading manifest file '../../build/game_engine/game_engine.egg-info/SOURCES.txt'
+[1.282s] writing manifest file '../../build/game_engine/game_engine.egg-info/SOURCES.txt'
+[1.282s] running build
+[1.282s] running build_py
+[1.282s] running install
+[1.286s] running install_lib
+[1.297s] running install_data
+[1.297s] running install_egg_info
+[1.309s] removing '/home/eashan-garg/MTRX4701_A4/install/game_engine/lib/python3.12/site-packages/game_engine-0.0.0-py3.12.egg-info' (and everything under it)
+[1.309s] Copying ../../build/game_engine/game_engine.egg-info to /home/eashan-garg/MTRX4701_A4/install/game_engine/lib/python3.12/site-packages/game_engine-0.0.0-py3.12.egg-info
+[1.310s] running install_scripts
+[1.388s] Installing game_controller script to /home/eashan-garg/MTRX4701_A4/install/game_engine/lib/game_engine
+[1.388s] writing list of installed files to '/home/eashan-garg/MTRX4701_A4/build/game_engine/install.log'
+[1.408s] Invoked command in '/home/eashan-garg/MTRX4701_A4/src/game_engine' returned '0': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PYTHONPATH=/home/eashan-garg/MTRX4701_A4/build/game_engine/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/eashan-garg/MTRX4701_A4/install/game_engine/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/game_engine build --build-base /home/eashan-garg/MTRX4701_A4/build/game_engine/build install --record /home/eashan-garg/MTRX4701_A4/build/game_engine/install.log --single-version-externally-managed install_data
