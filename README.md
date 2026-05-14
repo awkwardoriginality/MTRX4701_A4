@@ -30,3 +30,13 @@ Camera image
 → if chessboard not found: publish blocked=True
 → if found: classify green/purple pieces
 → if same board for 8 frames: publish blocked=False and publish board state
+
+
+# To add the realsense package which interfaces with the camera
+mkdir -p ~/realsense_ws/src
+cd ~/realsense_ws/src
+git clone https://github.com/IntelRealSense/realsense-ros.git
+cd ~/realsense_ws
+rosdep install -i --from-path src --rosdistro jazzy -y
+colcon build --symlink-install
+source install/setup.bash
