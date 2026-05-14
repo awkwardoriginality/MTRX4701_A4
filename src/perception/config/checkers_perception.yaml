@@ -1,0 +1,57 @@
+checkers_perception:
+  ros__parameters:
+    # -------------------------
+    # Input source
+    # -------------------------
+    input_mode: "ros"        # "ros" or "bag"
+    bag_path: "/home/eashan-garg/checkers1.bag"  
+    image_topic: "/camera/camera/color/image_raw"
+
+    # -------------------------
+    # Board crop / zoom
+    # -------------------------
+    crop_x_min: 0.28
+    crop_x_max: 0.72
+    crop_y_min: 0.18
+    crop_y_max: 0.82
+    zoom_scale: 2.0
+
+    # -------------------------
+    # ArUco marker IDs
+    # -------------------------
+    top_left_id: 3
+    top_right_id: 1
+    bottom_right_id: 0
+    bottom_left_id: 2
+
+    aruco_dictionary: "DICT_4X4_50"
+    max_missing_aruco_frames: 10
+    aruco_smoothing_alpha: 0.85
+
+    # -------------------------
+    # Board processing
+    # -------------------------
+    output_size: 800
+    chessboard_rows: 7
+    chessboard_cols: 7
+    stable_required_frames: 8
+
+    # -------------------------
+    # Piece colour thresholds HSV
+    # -------------------------
+    green_lower: [45, 80, 80]
+    green_upper: [85, 255, 255]
+
+    purple_lower: [105, 50, 50]
+    purple_upper: [145, 255, 255]
+
+    piece_min_ratio: 0.18
+    cell_crop_margin_ratio: 0.22
+
+    # -------------------------
+    # Output topics
+    # -------------------------
+    board_state_topic: "/checkers/board_state"
+    board_blocked_topic: "/checkers/board_blocked"
+    warped_view_topic: "/checkers/warped_view"
+    board_outline_topic: "/checkers/board_outline"

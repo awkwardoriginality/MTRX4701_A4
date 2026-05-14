@@ -16,44 +16,137 @@ class CheckersPerceptionNode(Node):
 
         self.bridge = CvBridge()
 
-        self.declare_parameter("input_mode", "bag")
+        # -------------------------
+        # Input source
+        # -------------------------
+        self.declare_parameter("input_mode", "ros")
         self.declare_parameter("bag_path", "")
-        self.declare_parameter("image_topic", "/camera/color/image_raw")
+        self.declare_parameter("image_topic", "/camera/camera/color/image_raw")
 
+        # -------------------------
+        # Board crop / zoom
+        # -------------------------
+        self.declare_parameter("crop_x_min", 0.28)
+        self.declare_parameter("crop_x_max", 0.72)
+        self.declare_parameter("crop_y_min", 0.18)
+        self.declare_parameter("crop_y_max", 0.82)
+        self.declare_parameter("zoom_scale", 2.0)
+
+        # -------------------------
+        # ArUco marker IDs
+        # -------------------------
+        self.declare_parameter("top_left_id", 3)
+        self.declare_parameter("top_right_id", 1)
+        self.declare_parameter("bottom_right_id", 0)
+        self.declare_parameter("bottom_left_id", 2)
+
+        self.declare_parameter("aruco_dictionary", "DICT_4X4_50")
+        self.declare_parameter("max_missing_aruco_frames", 10)
+        self.declare_parameter("aruco_smoothing_alpha", 0.85)
+
+        # -------------------------
+        # Board processing
+        # -------------------------
+        self.declare_parameter("output_size", 800)
+        self.declare_parameter("chessboard_rows", 7)
+        self.declare_parameter("chessboard_cols", 7)
+        self.declare_parameter("stable_required_frames", 8)
+
+        # -------------------------
+        # Piece colour thresholds HSV
+        # -------------------------
+        self.declare_parameter("green_lower", [45, 80, 80])
+        self.declare_parameter("green_upper", [85, 255, 255])
+
+        self.declare_parameter("purple_lower", [105, 50, 50])
+        self.declare_parameter("purple_upper", [145, 255, 255])
+
+        self.declare_parameter("piece_min_ratio", 0.18)
+        self.declare_parameter("cell_crop_margin_ratio", 0.22)
+
+        # -------------------------
+        # Output topics
+        # -------------------------
+        self.declare_parameter("board_state_topic", "/checkers/board_state")
+        self.declare_parameter("board_blocked_topic", "/checkers/board_blocked")
+        self.declare_parameter("warped_view_topic", "/checkers/warped_view")
+        self.declare_parameter("board_outline_topic", "/checkers/board_outline")
+
+        # -------------------------
+        # Read params
+        # -------------------------
         self.input_mode = self.get_parameter("input_mode").value
         self.bag_path = self.get_parameter("bag_path").value
         self.image_topic = self.get_parameter("image_topic").value
 
-        self.board_pub = self.create_publisher(Int32MultiArray, "/checkers/board_state", 10)
-        self.blocked_pub = self.create_publisher(Bool, "/checkers/board_blocked", 10)
-        self.debug_pub = self.create_publisher(Image, "/checkers/warped_view", 10)
-        self.outline_pub = self.create_publisher(Image, "/checkers/board_outline", 10)
+        self.crop_x_min = float(self.get_parameter("crop_x_min").value)
+        self.crop_x_max = float(self.get_parameter("crop_x_max").value)
+        self.crop_y_min = float(self.get_parameter("crop_y_min").value)
+        self.crop_y_max = float(self.get_parameter("crop_y_max").value)
+        self.zoom_scale = float(self.get_parameter("zoom_scale").value)
 
-        self.TOP_LEFT_ID = 0
-        self.TOP_RIGHT_ID = 2
-        self.BOTTOM_RIGHT_ID = 3
-        self.BOTTOM_LEFT_ID = 1
+        self.TOP_LEFT_ID = int(self.get_parameter("top_left_id").value)
+        self.TOP_RIGHT_ID = int(self.get_parameter("top_right_id").value)
+        self.BOTTOM_RIGHT_ID = int(self.get_parameter("bottom_right_id").value)
+        self.BOTTOM_LEFT_ID = int(self.get_parameter("bottom_left_id").value)
 
-        self.output_size = 800
+        self.aruco_dictionary_name = self.get_parameter("aruco_dictionary").value
+        self.max_missing_aruco_frames = int(self.get_parameter("max_missing_aruco_frames").value)
+        self.src_alpha = float(self.get_parameter("aruco_smoothing_alpha").value)
+
+        self.output_size = int(self.get_parameter("output_size").value)
         self.cell_size = self.output_size // 8
 
-        self.stable_required_frames = 8
-        self.last_board = None
+        rows = int(self.get_parameter("chessboard_rows").value)
+        cols = int(self.get_parameter("chessboard_cols").value)
+        self.chessboard_pattern_size = (cols, rows)
+
+        self.stable_required_frames = int(self.get_parameter("stable_required_frames").value)
+
+        self.green_lower = np.array(self.get_parameter("green_lower").value, dtype=np.uint8)
+        self.green_upper = np.array(self.get_parameter("green_upper").value, dtype=np.uint8)
+
+        self.purple_lower = np.array(self.get_parameter("purple_lower").value, dtype=np.uint8)
+        self.purple_upper = np.array(self.get_parameter("purple_upper").value, dtype=np.uint8)
+
+        self.piece_min_ratio = float(self.get_parameter("piece_min_ratio").value)
+        self.cell_crop_margin_ratio = float(self.get_parameter("cell_crop_margin_ratio").value)
+
+        self.board_state_topic = self.get_parameter("board_state_topic").value
+        self.board_blocked_topic = self.get_parameter("board_blocked_topic").value
+        self.warped_view_topic = self.get_parameter("warped_view_topic").value
+        self.board_outline_topic = self.get_parameter("board_outline_topic").value
+
+        # -------------------------
+        # Publishers
+        # -------------------------
+        self.board_pub = self.create_publisher(Int32MultiArray, self.board_state_topic, 10)
+        self.blocked_pub = self.create_publisher(Bool, self.board_blocked_topic, 10)
+        self.debug_pub = self.create_publisher(Image, self.warped_view_topic, 10)
+        self.outline_pub = self.create_publisher(Image, self.board_outline_topic, 10)
+
+        # -------------------------
+        # State variables
+        # -------------------------
         self.stable_count = 0
+        self.last_board = None
         self.last_published_board = None
 
-        self.chessboard_pattern_size = (7, 7)
-
-        self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
-        self.aruco_params = cv2.aruco.DetectorParameters_create()
-
-        # ArUco cache
         self.last_src_pts = None
         self.last_layout_centre = None
         self.missing_aruco_count = 0
-        self.max_missing_aruco_frames = 10
-        self.src_alpha = 0.85
 
+        # -------------------------
+        # ArUco setup
+        # -------------------------
+        self.aruco_dict = cv2.aruco.getPredefinedDictionary(
+            self.get_aruco_dictionary(self.aruco_dictionary_name)
+        )
+        self.aruco_params = cv2.aruco.DetectorParameters_create()
+
+        # -------------------------
+        # Input mode setup
+        # -------------------------
         if self.input_mode == "ros":
             self.image_sub = self.create_subscription(
                 Image,
@@ -87,6 +180,34 @@ class CheckersPerceptionNode(Node):
             raise RuntimeError("input_mode must be either 'ros' or 'bag'")
 
         self.get_logger().info("Checkers perception node started")
+        self.get_logger().info(
+            f"Crop x=({self.crop_x_min}, {self.crop_x_max}), "
+            f"y=({self.crop_y_min}, {self.crop_y_max}), zoom={self.zoom_scale}"
+        )
+
+    def get_aruco_dictionary(self, name):
+        aruco_map = {
+            "DICT_4X4_50": cv2.aruco.DICT_4X4_50,
+            "DICT_4X4_100": cv2.aruco.DICT_4X4_100,
+            "DICT_4X4_250": cv2.aruco.DICT_4X4_250,
+            "DICT_4X4_1000": cv2.aruco.DICT_4X4_1000,
+            "DICT_5X5_50": cv2.aruco.DICT_5X5_50,
+            "DICT_5X5_100": cv2.aruco.DICT_5X5_100,
+            "DICT_5X5_250": cv2.aruco.DICT_5X5_250,
+            "DICT_5X5_1000": cv2.aruco.DICT_5X5_1000,
+            "DICT_6X6_50": cv2.aruco.DICT_6X6_50,
+            "DICT_6X6_100": cv2.aruco.DICT_6X6_100,
+            "DICT_6X6_250": cv2.aruco.DICT_6X6_250,
+            "DICT_6X6_1000": cv2.aruco.DICT_6X6_1000,
+        }
+
+        if name not in aruco_map:
+            self.get_logger().warn(
+                f"Unknown aruco_dictionary '{name}', using DICT_4X4_50"
+            )
+            return cv2.aruco.DICT_4X4_50
+
+        return aruco_map[name]
 
     def bag_callback(self):
         try:
@@ -213,7 +334,9 @@ class CheckersPerceptionNode(Node):
                     criteria
                 )
 
-        if found and corners is not None and len(corners) == 49:
+        expected_corners = self.chessboard_pattern_size[0] * self.chessboard_pattern_size[1]
+
+        if found and corners is not None and len(corners) == expected_corners:
             cv2.drawChessboardCorners(
                 debug,
                 self.chessboard_pattern_size,
@@ -223,7 +346,7 @@ class CheckersPerceptionNode(Node):
 
             cv2.putText(
                 debug,
-                "BOARD CLEAR: CHESSBOARD 49/49",
+                f"BOARD CLEAR: CHESSBOARD {expected_corners}/{expected_corners}",
                 (20, 35),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.9,
@@ -254,21 +377,27 @@ class CheckersPerceptionNode(Node):
     def get_warped_board(self, frame):
         h, w = frame.shape[:2]
 
-        # Crop around board area. Adjust these if board is not centred.
-        x1 = int(w * 0.28)
-        x2 = int(w * 0.72)
-        y1 = int(h * 0.18)
-        y2 = int(h * 0.82)
+        x1 = int(w * self.crop_x_min)
+        x2 = int(w * self.crop_x_max)
+        y1 = int(h * self.crop_y_min)
+        y2 = int(h * self.crop_y_max)
+
+        x1 = max(0, min(x1, w - 1))
+        x2 = max(1, min(x2, w))
+        y1 = max(0, min(y1, h - 1))
+        y2 = max(1, min(y2, h))
+
+        if x2 <= x1 or y2 <= y1:
+            self.get_logger().warn("Invalid crop parameters")
+            return None, frame
 
         roi = frame[y1:y2, x1:x2]
 
-        # Zoomed view used for ArUco detection and rqt outline display
-        scale = 2.0
         roi_big = cv2.resize(
             roi,
             None,
-            fx=scale,
-            fy=scale,
+            fx=self.zoom_scale,
+            fy=self.zoom_scale,
             interpolation=cv2.INTER_LINEAR
         )
 
@@ -328,7 +457,6 @@ class CheckersPerceptionNode(Node):
                     inner_corner(self.BOTTOM_LEFT_ID)
                 ], dtype=np.float32)
 
-                # Smooth detected board corners
                 if self.last_src_pts is None:
                     src_pts = src_pts_new.copy()
                     layout_centre = layout_centre_new.copy()
@@ -349,7 +477,6 @@ class CheckersPerceptionNode(Node):
 
                 cv2.aruco.drawDetectedMarkers(outline_img, corners, ids)
 
-        # If detection failed, use cached board corners
         if not detection_ok:
             if (
                 self.last_src_pts is not None and
@@ -382,10 +509,10 @@ class CheckersPerceptionNode(Node):
         outline_pts = src_pts.astype(np.int32).reshape((-1, 1, 2))
 
         if using_cache:
-            outline_colour = (0, 255, 255)   # yellow when cached
+            outline_colour = (0, 255, 255)
             text = f"USING CACHED ARUCO {self.missing_aruco_count}/{self.max_missing_aruco_frames}"
         else:
-            outline_colour = (0, 255, 0)     # green when live detected
+            outline_colour = (0, 255, 0)
             text = "LIVE ARUCO DETECTION"
 
         cv2.polylines(outline_img, [outline_pts], True, outline_colour, 4)
@@ -413,7 +540,6 @@ class CheckersPerceptionNode(Node):
 
         H = cv2.getPerspectiveTransform(src_pts, dst_pts)
 
-        # Warp from the zoomed/cropped image, not the full frame
         warped = cv2.warpPerspective(
             roi_big,
             H,
@@ -428,12 +554,6 @@ class CheckersPerceptionNode(Node):
         board = np.zeros((8, 8), dtype=np.int32)
         debug_img = warped.copy()
 
-        green_lower = np.array([45, 80, 80])
-        green_upper = np.array([85, 255, 255])
-
-        purple_lower = np.array([105, 50, 50])
-        purple_upper = np.array([145, 255, 255])
-
         for row in range(8):
             for col in range(8):
                 x1 = col * self.cell_size
@@ -441,11 +561,17 @@ class CheckersPerceptionNode(Node):
                 x2 = x1 + self.cell_size
                 y2 = y1 + self.cell_size
 
-                margin = int(self.cell_size * 0.22)
+                margin = int(self.cell_size * self.cell_crop_margin_ratio)
                 crop = hsv[y1 + margin:y2 - margin, x1 + margin:x2 - margin]
 
-                green_mask = cv2.inRange(crop, green_lower, green_upper)
-                purple_mask = cv2.inRange(crop, purple_lower, purple_upper)
+                if crop.size == 0:
+                    state = 0
+                    label = "."
+                    board[row, col] = state
+                    continue
+
+                green_mask = cv2.inRange(crop, self.green_lower, self.green_upper)
+                purple_mask = cv2.inRange(crop, self.purple_lower, self.purple_upper)
 
                 green_pixels = cv2.countNonZero(green_mask)
                 purple_pixels = cv2.countNonZero(purple_mask)
@@ -455,10 +581,10 @@ class CheckersPerceptionNode(Node):
                 green_ratio = green_pixels / crop_area
                 purple_ratio = purple_pixels / crop_area
 
-                if green_ratio > 0.18 and green_ratio > purple_ratio:
+                if green_ratio > self.piece_min_ratio and green_ratio > purple_ratio:
                     state = 1
                     label = "G"
-                elif purple_ratio > 0.18 and purple_ratio > green_ratio:
+                elif purple_ratio > self.piece_min_ratio and purple_ratio > green_ratio:
                     state = 2
                     label = "P"
                 else:
