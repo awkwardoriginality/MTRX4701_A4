@@ -38,8 +38,8 @@ class BoardCoordinates:
 
     # ─── Default geometry (configurable via YAML) ────────────────────────
     DEFAULT_SQUARE_SIZE = 0.050     # 50 mm per square
-    DEFAULT_PIECE_HEIGHT = 0.006    # 6 mm piece height
-    DEFAULT_KING_HEIGHT = 0.012     # 12 mm (stacked) king height
+    DEFAULT_PIECE_HEIGHT = 0.020    # 20 mm piece height
+    DEFAULT_KING_HEIGHT = 0.040     # 40 mm (stacked) king height
 
     # Heights for manipulation
     HOVER_HEIGHT = 0.080            # 80 mm above board surface

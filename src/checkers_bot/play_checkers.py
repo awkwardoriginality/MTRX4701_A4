@@ -560,7 +560,7 @@ class CheckersGUI:
         angles = np.linspace(0, 2 * np.pi, 18)
         cos_a = np.cos(angles)
         sin_a = np.sin(angles)
-        radius = 0.018  # 18mm physical checker token radius
+        radius = 0.0175  # 17.5mm radius (35mm physical checker token diameter)
 
         for sq in PLAYABLE_SQUARES:
             piece = self.game.board.b[sq]
