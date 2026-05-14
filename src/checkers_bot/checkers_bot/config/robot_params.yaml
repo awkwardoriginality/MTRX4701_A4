@@ -1,0 +1,39 @@
+# UR5e robot parameters
+robot:
+  # Board-to-robot base frame transform (4x4 homogeneous matrix)
+  # To be calibrated via hand-eye calibration (Tsai-Lenz AX=XB)
+  # Default: identity (placeholder)
+  board_to_robot_tf:
+    - [1.0, 0.0, 0.0, 0.4]    # x-translation: 40cm from robot base
+    - [0.0, 1.0, 0.0, -0.2]   # y-translation: -20cm
+    - [0.0, 0.0, 1.0, 0.0]    # z on the table surface
+    - [0.0, 0.0, 0.0, 1.0]
+
+  # End-effector type: "vacuum" or "gripper"
+  end_effector: "gripper"
+
+  # Tool centre point (TCP) offset from flange
+  tcp_offset:
+    x: 0.0
+    y: 0.0
+    z: 0.15    # 15cm below flange (approximate)
+
+# Motion parameters
+motion:
+  transit_speed: 0.3         # m/s for fast movements
+  approach_speed: 0.1        # m/s for precision approach
+  bob_speed: 0.15            # m/s during bobbing
+  wag_speed: 0.8             # m/s during finger wag
+  acceleration: 0.5          # m/s² default acceleration
+
+# Force/torque limits
+force:
+  contact_threshold: 5.0     # N — detect contact during descent
+  grasp_force: 3.0           # N — grasping force limit
+  max_force: 20.0            # N — safety limit
+
+# Game AI parameters
+ai:
+  search_time: 5.0           # seconds per move
+  max_depth: 99              # max search depth (effectively unlimited)
+  human_colour: 2            # CB_BLACK=2 (human plays black)

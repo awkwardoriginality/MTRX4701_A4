@@ -1,0 +1,30 @@
+# Board physical parameters
+board:
+  square_size: 0.050        # metres (50mm)
+  piece_height: 0.006       # metres (6mm)
+  king_height: 0.012        # metres (12mm stacked)
+  board_width: 0.400        # metres (8 * 50mm)
+
+# ArUco marker IDs at the four board corners
+aruco:
+  dictionary: DICT_4X4_50
+  marker_ids: [0, 1, 2, 3]
+  marker_size: 0.030        # metres (30mm)
+
+# Manipulation heights
+heights:
+  hover: 0.080              # metres above board surface
+  approach: 0.020           # metres above board for slow approach
+  bob: 0.025                # metres above board during multi-jump bobbing
+
+# Discard pile configuration
+discard:
+  offset_x: -0.060          # metres left of board
+  start_y: 0.050            # metres from board bottom edge
+  spacing: 0.035            # metres between pieces
+
+# Reserve pile (for king promotion stacking)
+reserve:
+  offset_x: -0.060
+  start_y: 0.350
+  spacing: 0.035
