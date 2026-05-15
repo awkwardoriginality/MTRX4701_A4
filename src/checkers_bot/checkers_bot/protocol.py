@@ -36,7 +36,9 @@ class BoardStateReport(JsonMessage):
     flat64: List[int]
     stable_count: int = 1
     hand_present: bool = False
+    board_blocked: bool = False
     confidence: float = 1.0
+    encoding: str = "flat64-piece-codes"
     source: str = "perception"
 
 

@@ -3,7 +3,7 @@ ROS2 launch file for the checkers bot.
 
 Launches all nodes required for a game of English checkers:
     - game_manager: State machine and AI orchestrator
-    - perception_node: Camera → board state (placeholder)
+    - checkers_perception: Camera -> canonical board state adapter
     - manipulation_node: UR5e motion execution (placeholder)
 
 Usage:
@@ -20,6 +20,7 @@ from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
     pkg_dir = get_package_share_directory('checkers_bot')
+    perception_pkg_dir = get_package_share_directory('perception')
 
     # Launch arguments
     search_time_arg = DeclareLaunchArgument(
@@ -48,15 +49,13 @@ def generate_launch_description():
 
     # Perception node
     perception_node = Node(
-        package='checkers_bot',
-        executable='perception',
-        name='perception_node',
+        package='perception',
+        executable='checkers_perception',
+        name='checkers_perception',
         output='screen',
-        parameters=[{
-            'rgb_topic': '/camera/color/image_raw',
-            'depth_topic': '/camera/depth/image_rect_raw',
-            'publish_rate': 2.0,
-        }],
+        parameters=[
+            os.path.join(perception_pkg_dir, 'config', 'checkers_perception.yaml'),
+        ],
     )
 
     # Manipulation node

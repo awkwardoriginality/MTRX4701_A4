@@ -75,6 +75,7 @@ class GameManagerNode:
         self._stable_board_count = 0
         self.required_stable_frames = 2
         self._command_counter = 0
+        self._board_blocked = False
 
         if self.use_ros2:
             self._init_ros2()
@@ -122,6 +123,12 @@ class GameManagerNode:
             10,
         )
         self.node.create_subscription(
+            Bool,
+            '/checkers/board_blocked',
+            self._board_blocked_callback,
+            10,
+        )
+        self.node.create_subscription(
             String,
             '/checkers/board_state_report',
             self._board_state_report_callback,
@@ -150,9 +157,18 @@ class GameManagerNode:
 
     def _board_state_callback(self, msg):
         """Handle perceived board state from perception."""
+        if self._board_blocked:
+            return
         flat = list(msg.data)
         if len(flat) == 64:
             self._accept_stable_board(flat)
+
+    def _board_blocked_callback(self, msg):
+        """Handle a coarse board visibility signal for compatibility."""
+        self._board_blocked = bool(msg.data)
+        if self._board_blocked:
+            self._stable_board_count = 0
+            self.ctx.perceived_board = None
 
     def _board_state_report_callback(self, msg):
         """Handle structured board-state reports from perception."""
@@ -162,8 +178,10 @@ class GameManagerNode:
             logger.warning(f"Invalid board state report received: {exc}")
             return
 
-        if report.hand_present:
+        self._board_blocked = report.board_blocked
+        if report.board_blocked or report.hand_present:
             self._stable_board_count = 0
+            self.ctx.perceived_board = None
             return
 
         self._accept_stable_board(report.flat64, stable_count=report.stable_count)

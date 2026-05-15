@@ -1,6 +1,8 @@
 devel/
 logs/
+log/
 build/
+install/
 bin/
 lib/
 msg_gen/
@@ -35,6 +37,7 @@ CMakeLists.txt.user
 srv/_*.py
 *.pcd
 *.pyc
+__pycache__/
 qtcreator-*
 *.user
 
