@@ -72,8 +72,17 @@ ros2 run ur5e_manoeuvring chessboard_marker_node --ros-args \
 -p square_size:=0.05 \
 -p rotation_steps:=1
 
+origin_x         # board bottom-left x position relative to base_link (metres)
+origin_y         # board bottom-left y position relative to base_link (metres)
+origin_z         # board height relative to base_link (metres)
+square_size      # checkerboard square size (metres) -> 0.05 = 5 cm
+rotation_steps   # board rotation: 0=0°, 1=90°, 2=180°, 3=270°
+
 ## To add a bounding box
 ros2 run ur5e_manoeuvring bounding_box_node
+
+## To run cartesian goal sending node
+ros2 run ur5e_manoeuvring ur5e_cartesian_node
 ----------------------------------------------------------------------
 
 ### Robotic Control in HARDWARE
@@ -131,6 +140,21 @@ control_msgs/action/ParallelGripperCommand \
   position: [0.025]
 "
 
-# Command to test IK (Just telling the arm where to go)
+# Command to send a Cartesian goal to the UR5e node
 ros2 topic pub --once /ur5e_cartesian_goal std_msgs/msg/String \
 "{data: '{\"x\":0.35,\"y\":0.0,\"z\":0.35,\"roll\":3.14,\"pitch\":0.0,\"yaw\":0.0,\"gripper\":0.025,\"time\":4.0}'}"
+
+
+x        = target x position relative to base_link (metres)
+y        = target y position relative to base_link (metres)
+z        = target z position relative to base_link (metres)
+
+roll     = end-effector roll angle (radians)
+pitch    = end-effector pitch angle (radians)
+yaw      = end-effector yaw angle (radians)
+
+gripper  = gripper opening amount (metres)
+             0.025 = open
+             0.0   = closed
+
+time     = movement duration (seconds)
