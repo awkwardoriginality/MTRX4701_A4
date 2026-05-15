@@ -9,8 +9,8 @@ Supports two premium play modes:
 Features:
     - Grounded in the fully ported pure-Python KingsRow checkers engine
     - Validates all English checkers rules (mandatory captures, king promotion)
-    - Full point-and-click move preview and piece selection highlighting
-    - AI search hints, real-time evaluation scores, and game history logs
+    - Full point-and-click move preview, illegal move rollback, and hop animation
+    - Real-time evaluation feedback, game history, and play-state decision logs
     - Standalone gameplay with no dependency on the arm visualisation
 
 Usage:
@@ -38,7 +38,7 @@ from checkers_bot.game_engine.board import (
     BLACK_MAN, BLACK_KING, WHITE_MAN, WHITE_KING,
     FREE,
     INTERNAL_TO_STANDARD, STANDARD_TO_INTERNAL,
-    ROWCOL_TO_INTERNAL,
+    INTERNAL_TO_XY, ROWCOL_TO_INTERNAL, XY_TO_INTERNAL,
 )
 from checkers_bot.game_engine.move_generator import MoveGenerator
 from checkers_bot.game_engine.search import Search
@@ -150,6 +150,57 @@ def find_matching_move(from_std: int, to_std: int, legal_moves: List[Move]) -> O
     return None
 
 
+def format_square_move(from_sq: int, to_sq: int) -> str:
+    """Format an observed move attempt between two internal squares."""
+    from_std = INTERNAL_TO_STANDARD.get(from_sq, from_sq)
+    to_std = INTERNAL_TO_STANDARD.get(to_sq, to_sq)
+    return f"{from_std}-{to_std}"
+
+
+def is_multi_hop_capture(move: Move) -> bool:
+    """Return True when a capture traverses multiple landing squares."""
+    return move.is_capture and len(get_move_path_squares(move)) > 2
+
+
+def get_move_path_squares(move: Move) -> List[int]:
+    """Return the best available square-by-square trajectory for a move."""
+    if not move.is_capture:
+        return move.path_squares if move.path_squares else [move.from_sq, move.to_sq]
+
+    if move.path_squares and len(move.path_squares) > 2:
+        return move.path_squares
+
+    if not move.captured_squares:
+        return move.path_squares if move.path_squares else [move.from_sq, move.to_sq]
+
+    path = [move.from_sq]
+    current_sq = move.from_sq
+
+    for cap_sq in move.captured_squares:
+        current_xy = INTERNAL_TO_XY.get(current_sq)
+        captured_xy = INTERNAL_TO_XY.get(cap_sq)
+        if current_xy is None or captured_xy is None:
+            return move.path_squares if move.path_squares else [move.from_sq, move.to_sq]
+
+        dx = captured_xy[0] - current_xy[0]
+        dy = captured_xy[1] - current_xy[1]
+        if abs(dx) != 1 or abs(dy) != 1:
+            return move.path_squares if move.path_squares else [move.from_sq, move.to_sq]
+
+        landing_xy = (captured_xy[0] + dx, captured_xy[1] + dy)
+        landing_sq = XY_TO_INTERNAL.get(landing_xy)
+        if landing_sq is None:
+            return move.path_squares if move.path_squares else [move.from_sq, move.to_sq]
+
+        path.append(landing_sq)
+        current_sq = landing_sq
+
+    if path[-1] != move.to_sq:
+        path.append(move.to_sq)
+
+    return path
+
+
 # ─── Core Game Logic Controller ─────────────────────────────────────────────
 
 class CheckersGame:
@@ -167,11 +218,21 @@ class CheckersGame:
 
         self.move_number = 0
         self.move_history: List[str] = []
+        self.decision_history: List[str] = []
         self.board_history: List[Board] = [self.board.copy()]
         self.last_move: Optional[Move] = None
 
         self.human_name = "Red" if human_colour == CB_BLACK else "White"
         self.robot_name = "White" if human_colour == CB_BLACK else "Red"
+        self.log_decision(
+            "INIT",
+            f"Game initialised. Human={self.human_name}, robot={self.robot_name}.",
+        )
+
+    def log_decision(self, state: str, detail: str):
+        """Record a play-state decision for UI display."""
+        entry_no = len(self.decision_history) + 1
+        self.decision_history.append(f"{entry_no}. {state}: {detail}")
 
     def apply_move(self, move: Move):
         """Apply a move to the authoritative board state."""
@@ -224,8 +285,8 @@ class CheckersGUI:
         self.game = game
 
         self.root.title("English Checkers")
-        self.root.geometry("980x750")
-        self.root.minsize(900, 650)
+        self.root.geometry("1360x760")
+        self.root.minsize(1220, 650)
 
         # Configure dark-mode inspired premium styling
         self.bg_base = "#1E1E1E"
@@ -235,6 +296,8 @@ class CheckersGUI:
         self.color_light_sq = "#DEB887"     # Smooth warm maple
         self.color_selected = "#00FFCC"     # Vibrant cyan highlight
         self.color_target = "#7FFF00"       # Chartreuse valid target dot
+        self.color_status_normal = "#00FFCC"
+        self.color_status_error = "#FF4D4D"
 
         self.root.configure(bg=self.bg_base)
 
@@ -243,12 +306,18 @@ class CheckersGUI:
         self.legal_moves_cache: List[Move] = []
         self.valid_targets: dict[int, Move] = {}  # destination_square -> Move object
         self.ai_thinking = False
+        self.animating_move = False
+        self.display_board: Optional[Board] = None
+        self.preview_piece: Optional[int] = None
+        self.preview_target_rc: Optional[Tuple[int, int]] = None
+        self._last_turn_signature: Optional[Tuple[int, int]] = None
+        self._game_over_logged = False
 
         self._setup_ui()
         self._update_state()
 
     def _setup_ui(self):
-        """Construct canvas grid, digital twin viewport, and persistent statistics panel."""
+        """Construct the board, controls, move history, and decision log panes."""
         # Main layout frames
         self.main_panes = tk.PanedWindow(self.root, orient=tk.HORIZONTAL, bg=self.bg_base, bd=0)
         self.main_panes.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -262,9 +331,9 @@ class CheckersGUI:
         self.canvas.bind("<Configure>", self._on_resize)
         self.canvas.bind("<Button-1>", self._on_click)
 
-        # Right Frame: Statistics & Controls Sidebar
+        # Middle Frame: Statistics, controls, and move history
         self.sidebar = tk.Frame(self.main_panes, bg=self.bg_panel, bd=1, relief=tk.SUNKEN)
-        self.main_panes.add(self.sidebar, width=300)
+        self.main_panes.add(self.sidebar, width=320)
 
         # Custom heading styling
         title_font = font.Font(family="Helvetica", size=16, weight="bold")
@@ -275,7 +344,7 @@ class CheckersGUI:
         # Status Bar
         self.status_var = tk.StringVar(value="Game initialized.")
         self.lbl_status = tk.Label(self.sidebar, textvariable=self.status_var,
-                                   font=("Helvetica", 12, "bold"), bg=self.bg_panel, fg="#00FFCC", pady=5)
+                                   font=("Helvetica", 12, "bold"), bg=self.bg_panel, fg=self.color_status_normal, pady=5)
         self.lbl_status.pack(fill=tk.X)
 
         # Score Counters
@@ -291,9 +360,6 @@ class CheckersGUI:
         style = ttk.Style()
         style.theme_use('clam')
         style.configure('TButton', font=('Helvetica', 10, 'bold'), padding=5)
-
-        self.btn_hint = ttk.Button(btn_frame, text="💡 AI Hint", command=self._request_hint)
-        self.btn_hint.pack(fill=tk.X, pady=3)
 
         self.btn_undo = ttk.Button(btn_frame, text="↩ Undo Round", command=self._undo_round)
         self.btn_undo.pack(fill=tk.X, pady=3)
@@ -316,6 +382,24 @@ class CheckersGUI:
         self.log_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
+        # Right Frame: play-state decision trace
+        self.decision_sidebar = tk.Frame(self.main_panes, bg=self.bg_panel, bd=1, relief=tk.SUNKEN)
+        self.main_panes.add(self.decision_sidebar, width=380)
+
+        tk.Label(self.decision_sidebar, text="Play State Decisions:", font=("Helvetica", 10, "bold"),
+                 bg=self.bg_panel, fg=self.fg_text, anchor=tk.W, pady=10).pack(fill=tk.X, padx=10)
+
+        decision_frame = tk.Frame(self.decision_sidebar, bg=self.bg_panel)
+        decision_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(2, 10))
+
+        self.decision_box = tk.Listbox(decision_frame, bg="#1E1E1E", fg=self.fg_text, bd=0,
+                                       highlightthickness=1, highlightcolor="#333333", font=("Consolas", 10))
+        decision_scrollbar = ttk.Scrollbar(decision_frame, orient=tk.VERTICAL, command=self.decision_box.yview)
+        self.decision_box.configure(yscrollcommand=decision_scrollbar.set)
+
+        self.decision_box.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        decision_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
         self.sq_size = 75
         self.board_offset_x = 25
         self.board_offset_y = 25
@@ -331,6 +415,7 @@ class CheckersGUI:
     def _draw_board(self):
         """Draw interactive grid squares, piece circles, and king crowns."""
         self.canvas.delete("all")
+        board_view = self.display_board if self.display_board is not None else self.game.board
 
         # Determine rendering orientation
         perspective = self.game.human_colour
@@ -385,62 +470,247 @@ class CheckersGUI:
                                             fill=self.color_target, outline="#000000")
 
                 # Render pieces
-                piece = self.game.board.b[sq]
+                piece = board_view.b[sq]
                 if piece != FREE:
-                    pad = self.sq_size // 6
-                    px1 = x1 + pad
-                    py1 = y1 + pad
-                    px2 = x2 - pad
-                    py2 = y2 - pad
-
-                    # Styling per player
-                    if piece in (BLACK_MAN, BLACK_KING):
-                        p_fill = "#DC143C"  # Crimson Red
-                        p_out = "#8B0000"
-                    else:
-                        p_fill = "#F8F8FF"  # Crisp Ivory White
-                        p_out = "#A9A9A9"
-
-                    # Shaded 3D layered circles
-                    self.canvas.create_oval(px1, py1+2, px2, py2+2, fill="#0F0F0F", outline="") # shadow
-                    self.canvas.create_oval(px1, py1, px2, py2, fill=p_fill, outline=p_out, width=2)
-
-                    # Inner ring for premium mechatronic look
-                    ipad = pad + (self.sq_size // 12)
-                    self.canvas.create_oval(x1+ipad, y1+ipad, x2-ipad, y2-ipad, fill="", outline=p_out, width=1)
-
-                    # King status symbol
-                    if piece in (BLACK_KING, WHITE_KING):
-                        cx = (x1 + x2) // 2
-                        cy = (y1 + y2) // 2
-                        crown_color = "#FFD700" if piece == BLACK_KING else "#DAA520"
-                        self.canvas.create_text(cx, cy, text="♛", font=("Helvetica", max(self.sq_size//3, 14)),
-                                                fill=crown_color)
+                    self._draw_piece(piece, x1, y1, x2, y2)
                 else:
                     # Subtle square numbering for reference
                     std_num = INTERNAL_TO_STANDARD.get(sq, "")
                     self.canvas.create_text(x1+8, y2-8, text=str(std_num), font=("Helvetica", 8),
                                             fill="#A0A0A0" if is_dark else "")
 
-    def _update_state(self):
-        """Update side panel counters, evaluate turn legality, and drive AI states."""
-        self.selected_sq = None
-        self.valid_targets.clear()
+        if self.preview_piece is not None and self.preview_target_rc is not None:
+            preview_row, preview_col = self.preview_target_rc
+            preview_r_idx = (7 - preview_row) if perspective == CB_BLACK else preview_row
+            x1 = x_start + preview_col * self.sq_size
+            y1 = y_start + preview_r_idx * self.sq_size
+            x2 = x1 + self.sq_size
+            y2 = y1 + self.sq_size
+            self._draw_piece(self.preview_piece, x1, y1, x2, y2)
 
-        # Update lists
+    def _draw_piece(self, piece: int, x1: int, y1: int, x2: int, y2: int):
+        """Draw a checker piece inside the given square bounds."""
+        pad = self.sq_size // 6
+        px1 = x1 + pad
+        py1 = y1 + pad
+        px2 = x2 - pad
+        py2 = y2 - pad
+
+        if piece in (BLACK_MAN, BLACK_KING):
+            p_fill = "#DC143C"
+            p_out = "#8B0000"
+        else:
+            p_fill = "#F8F8FF"
+            p_out = "#A9A9A9"
+
+        self.canvas.create_oval(px1, py1 + 2, px2, py2 + 2, fill="#0F0F0F", outline="")
+        self.canvas.create_oval(px1, py1, px2, py2, fill=p_fill, outline=p_out, width=2)
+
+        ipad = pad + (self.sq_size // 12)
+        self.canvas.create_oval(x1 + ipad, y1 + ipad, x2 - ipad, y2 - ipad, fill="", outline=p_out, width=1)
+
+        if piece in (BLACK_KING, WHITE_KING):
+            cx = (x1 + x2) // 2
+            cy = (y1 + y2) // 2
+            crown_color = "#FFD700" if piece == BLACK_KING else "#DAA520"
+            self.canvas.create_text(cx, cy, text="♛", font=("Helvetica", max(self.sq_size // 3, 14)),
+                                    fill=crown_color)
+
+    def _set_status(self, text: str, *, error: bool = False):
+        """Update status text and colour."""
+        self.status_var.set(text)
+        self.lbl_status.configure(fg=self.color_status_error if error else self.color_status_normal)
+
+    def _refresh_logs(self):
+        """Synchronise the move and decision listboxes with stored history."""
         self.log_box.delete(0, tk.END)
         for item in self.game.move_history:
             self.log_box.insert(tk.END, item)
         self.log_box.yview(tk.END)
 
+        self.decision_box.delete(0, tk.END)
+        for item in self.game.decision_history:
+            self.decision_box.insert(tk.END, item)
+        self.decision_box.yview(tk.END)
+
+    def _log_decision(self, state: str, detail: str):
+        """Record a decision entry and refresh the visible log."""
+        self.game.log_decision(state, detail)
+        self._refresh_logs()
+
+    def _select_square(self, sq: int):
+        """Select a human piece and show all currently legal destinations."""
+        self.selected_sq = sq
+        self.valid_targets.clear()
+        for move in self.legal_moves_cache:
+            if move.from_sq == sq:
+                self.valid_targets[move.to_sq] = move
+        self._draw_board()
+
+    def _build_attempt_board(self, from_sq: int, to_sq: int) -> Board:
+        """Create a temporary board showing a manually attempted move."""
+        preview = self.game.board.copy()
+        piece = preview.b[from_sq]
+        preview.b[from_sq] = FREE
+        if to_sq in ROWCOL_TO_INTERNAL.values():
+            preview.b[to_sq] = piece
+        return preview
+
+    def _show_attempt_preview(self, from_sq: int, target_row: int, target_col: int):
+        """Visually transport a piece to an attempted destination square."""
+        piece = self.game.board.b[from_sq]
+        self.display_board = self.game.board.copy()
+        self.display_board.b[from_sq] = FREE
+        self.preview_piece = piece
+        self.preview_target_rc = (target_row, target_col)
+
+    def _build_hop_frames(self, move: Move) -> List[Tuple[Board, int]]:
+        """Build intermediate landing positions for a multi-hop capture."""
+        frames: List[Tuple[Board, int]] = []
+        working = self.game.board.copy()
+        path = get_move_path_squares(move)
+        piece = working.b[path[0]]
+        current_sq = path[0]
+
+        for idx, next_sq in enumerate(path[1:]):
+            working.b[current_sq] = FREE
+            working.b[next_sq] = piece
+            if idx < len(move.captured_squares):
+                working.b[move.captured_squares[idx]] = FREE
+            if idx == len(path) - 2 and move.is_promotion:
+                working.b[next_sq] = move.new_piece
+                piece = move.new_piece
+            frames.append((working.copy(), next_sq))
+            current_sq = next_sq
+
+        return frames
+
+    def _finish_move(self, move: Move):
+        """Commit a validated move and continue the game flow."""
+        self.display_board = None
+        self.preview_piece = None
+        self.preview_target_rc = None
+        self.animating_move = False
+        self.game.apply_move(move)
+        if move.is_promotion:
+            self._log_decision("CHECK_KING_PROMOTION", f"{move.to_notation()} reaches the back rank.")
+            self._log_decision("PROMOTE_TO_KING", f"{move.to_notation()} promotes to a king.")
+        else:
+            self._log_decision("CHECK_KING_PROMOTION", f"No promotion follows {move.to_notation()}.")
+        self._update_state()
+
+    def _animate_hop_move(self, move: Move, actor: str):
+        """Animate each landing square in a multi-hop capture."""
+        frames = self._build_hop_frames(move)
+        if not frames:
+            self._finish_move(move)
+            return
+
+        self.animating_move = True
+        self.selected_sq = None
+        self.valid_targets.clear()
+
+        def _step(idx: int):
+            if idx >= len(frames):
+                self._finish_move(move)
+                return
+
+            frame_board, landing_sq = frames[idx]
+            landing_std = INTERNAL_TO_STANDARD.get(landing_sq, landing_sq)
+            self.display_board = frame_board
+            self.preview_piece = None
+            self.preview_target_rc = None
+            self._set_status(f"{actor} hopping to square {landing_std}...")
+            self._log_decision(
+                "BOB_OVER_SQUARE",
+                f"{actor} lands hop {idx + 1}/{len(frames)} on square {landing_std}.",
+            )
+            self._draw_board()
+            self.root.after(220, lambda: _step(idx + 1))
+
+        _step(0)
+
+    def _execute_move(self, move: Move, actor: str):
+        """Execute a validated move, animating multi-hop captures when needed."""
+        if move.is_capture:
+            capture_text = f"{actor} executes capture {move.to_notation()}."
+            if is_multi_hop_capture(move):
+                capture_text = f"{actor} executes multi-hop capture {move.to_notation()}."
+            self._log_decision("EXECUTE_CAPTURE", capture_text)
+        else:
+            self._log_decision("EXECUTE_SIMPLE", f"{actor} executes {move.to_notation()}.")
+
+        if is_multi_hop_capture(move):
+            self._animate_hop_move(move, actor)
+        else:
+            self._finish_move(move)
+
+    def _attempt_illegal_move(self, from_sq: int, to_sq: int):
+        """Show an illegal human move briefly, then restore the board."""
+        attempted = format_square_move(from_sq, to_sq)
+        target_row, target_col = next((rc for rc, internal_sq in ROWCOL_TO_INTERNAL.items() if internal_sq == to_sq), (0, 0))
+        self._log_decision("VALIDATE_HUMAN_MOVE", f"Observed attempted move {attempted}.")
+        self._log_decision("ILLEGAL_MOVE_RESPONSE", f"Flagged {attempted} as illegal.")
+        self._set_status(f"Illegal move attempted: {attempted}. Reverting...", error=True)
+        self._show_attempt_preview(from_sq, target_row, target_col)
+        self.animating_move = True
+        self.selected_sq = None
+        self.valid_targets.clear()
+        self._draw_board()
+        self.root.after(450, lambda: self._finish_illegal_attempt(from_sq))
+
+    def _attempt_illegal_dark_square_move(self, from_sq: int, row: int, col: int):
+        """Treat a wrong-coloured square click as an explicit illegal move attempt."""
+        attempted_std = ((7 - row) * 4 + (col // 2) + 1) if self.game.human_colour == CB_BLACK else (row * 4 + (col // 2) + 1)
+        from_std = INTERNAL_TO_STANDARD.get(from_sq, from_sq)
+        attempted = f"{from_std}-{attempted_std}"
+        self._log_decision("VALIDATE_HUMAN_MOVE", f"Observed attempted move {attempted}.")
+        self._log_decision("ILLEGAL_MOVE_RESPONSE", f"Flagged {attempted} as illegal (wrong-coloured square).")
+        self._set_status(f"Illegal move attempted: {attempted}. Reverting...", error=True)
+        self._show_attempt_preview(from_sq, row, col)
+        self.animating_move = True
+        self.selected_sq = None
+        self.valid_targets.clear()
+        self._draw_board()
+        self.root.after(450, lambda: self._finish_illegal_attempt(from_sq))
+
+    def _finish_illegal_attempt(self, from_sq: int):
+        """Restore the board after an illegal move attempt."""
+        self.display_board = None
+        self.preview_piece = None
+        self.preview_target_rc = None
+        self.animating_move = False
+        self._set_status("Illegal move undone. Choose a legal move.", error=True)
+        self._log_decision("UNDO_ILLEGAL", "Restored the board and returned control to the player.")
+        if self.game.board.b[from_sq] != FREE:
+            self._select_square(from_sq)
+        else:
+            self._draw_board()
+
+    def _update_state(self):
+        """Update side panel counters, evaluate turn legality, and drive AI states."""
+        self.selected_sq = None
+        self.valid_targets.clear()
+        self.display_board = None
+        self.preview_piece = None
+        self.preview_target_rc = None
+        self.animating_move = False
+
+        # Update lists
+        self._refresh_logs()
+
         # Check Win/Loss status
         game_over, winner = self.game.rules.is_game_over(self.game.board, self.game.current_turn)
         if game_over:
             win_str = "DRAW" if winner == "draw" else f"{winner.upper()} WINS!"
-            self.status_var.set(f"Game Over: {win_str}")
+            self._set_status(f"Game Over: {win_str}")
+            if not self._game_over_logged:
+                self._log_decision("GAME_OVER", f"Result recorded: {win_str}.")
+                self._game_over_logged = True
             self._draw_board()
             messagebox.showinfo("Game Over", f"The game has ended.\nResult: {win_str}")
             return
+        self._game_over_logged = False
 
         # Precalculate legal moves
         self.legal_moves_cache = self.game.rules.get_legal_moves(self.game.board, self.game.current_turn)
@@ -454,25 +724,38 @@ class CheckersGUI:
         turn_str = "Red's Turn" if self.game.current_turn == CB_BLACK else "White's Turn"
         if any(m.is_capture for m in self.legal_moves_cache):
             turn_str += "  [⚡ Mandatory Capture]"
-        self.status_var.set(turn_str)
+        self._set_status(turn_str)
 
         # Enable/disable human inputs depending on turn ownership
         is_human = (self.game.current_turn == self.game.human_colour)
-        self.btn_hint.state(['!disabled'] if is_human else ['disabled'])
         self.btn_undo.state(['!disabled'] if is_human and len(self.game.board_history) > 2 else ['disabled'])
+
+        turn_signature = (self.game.move_number, self.game.current_turn)
+        if turn_signature != self._last_turn_signature:
+            if is_human:
+                self._log_decision(
+                    "WAIT_HUMAN_MOVE",
+                    f"Awaiting {self.game.human_name}. {len(self.legal_moves_cache)} legal move(s) available.",
+                )
+            else:
+                self._log_decision(
+                    "PLAN_ROBOT_MOVE",
+                    f"{self.game.robot_name} to move. Search starts from {len(self.legal_moves_cache)} legal move(s).",
+                )
+            self._last_turn_signature = turn_signature
 
         self._draw_board()
 
         # Automatically execute AI thread if active
-        if not is_human and not self.ai_thinking:
+        if not is_human and not self.ai_thinking and not self.animating_move:
             self.ai_thinking = True
-            self.status_var.set("🤖 AI Engine Thinking...")
+            self._set_status("🤖 AI Engine Thinking...")
             self.root.update_idletasks()
             threading.Thread(target=self._run_ai_thread, daemon=True).start()
 
     def _on_click(self, event):
         """Map mouse clicks to grid tiles to preview paths or dispatch moves."""
-        if self.ai_thinking or self.game.current_turn != self.game.human_colour:
+        if self.ai_thinking or self.animating_move or self.game.current_turn != self.game.human_colour:
             return
 
         # Translate canvas clicks to internal coordinates
@@ -487,27 +770,32 @@ class CheckersGUI:
         rc = (row, col)
         sq = ROWCOL_TO_INTERNAL.get(rc)
         if sq is None:
+            if self.selected_sq is not None:
+                self._attempt_illegal_dark_square_move(self.selected_sq, row, col)
             return
+
+        piece = self.game.board.b[sq]
 
         # Clicked on a highlighted target destination → EXECUTE MOVE
         if sq in self.valid_targets:
             move = self.valid_targets[sq]
-            self.game.apply_move(move)
-            self._update_state()
+            self._log_decision("VALIDATE_HUMAN_MOVE", f"Accepted {move.to_notation()} as a legal move.")
+            self._execute_move(move, self.game.human_name)
             return
 
         # Clicked on own piece → SELECT & COMPUTE DESTINATIONS
-        piece = self.game.board.b[sq]
         if piece != FREE and (piece & 0x03) == self.game.human_colour:
-            self.selected_sq = sq
-            self.valid_targets.clear()
+            self._select_square(sq)
+            return
 
-            # Map target squares reachable by this specific selected piece
-            for m in self.legal_moves_cache:
-                if m.from_sq == sq:
-                    self.valid_targets[m.to_sq] = m
+        # Any other playable destination after selecting a piece is treated as a human illegal attempt.
+        if self.selected_sq is not None and sq != self.selected_sq:
+            self._attempt_illegal_move(self.selected_sq, sq)
+            return
 
-            self._draw_board()
+        self.selected_sq = None
+        self.valid_targets.clear()
+        self._draw_board()
 
     def _run_ai_thread(self):
         """Invoke Alpha-Beta engine seamlessly in background to avoid blocking Tk UI."""
@@ -519,46 +807,33 @@ class CheckersGUI:
         def _apply_ai():
             self.ai_thinking = True
             if stats.best_move:
+                self._log_decision(
+                    "PLAN_ROBOT_MOVE",
+                    f"{self.game.robot_name} selects {stats.best_move.to_notation()} "
+                    f"(depth {stats.depth_reached}, nodes {stats.nodes}, {stats.time_elapsed:.2f}s).",
+                )
                 # Add minimal reading delay so interaction feels incredibly natural
                 sleep_needed = max(0.0, 0.4 - elapsed)
                 if sleep_needed > 0:
                     time.sleep(sleep_needed)
-                self.game.apply_move(stats.best_move)
                 self.ai_thinking = False
-                self._update_state()
+                self._execute_move(stats.best_move, self.game.robot_name)
             else:
+                self._log_decision("PLAN_ROBOT_MOVE", f"{self.game.robot_name} found no valid response and resigns.")
                 messagebox.showinfo("Game Over", "AI has no valid responses and resigns!")
                 self.ai_thinking = False
                 self._update_state()
 
         self.root.after(10, _apply_ai)
 
-    def _request_hint(self):
-        """Query engine for human hint path recommendations."""
-        if self.ai_thinking:
-            return
-        self.status_var.set("💡 Computing best candidate...")
-        self.root.update_idletasks()
-
-        # Run synchronously since human hints are lightweight requested lookups
-        stats = self.game.search.find_best_move(self.game.board, self.game.human_colour)
-        if stats.best_move:
-            hint_str = stats.best_move.to_notation()
-            self.status_var.set(f"💡 Recommended Path: {hint_str}")
-            # Automatically preview recommended source tile
-            self.selected_sq = stats.best_move.from_sq
-            self.valid_targets = {stats.best_move.to_sq: stats.best_move}
-            self._draw_board()
-        else:
-            self.status_var.set("No viable hints available.")
-
     def _undo_round(self):
         """Take back previous AI round sequence execution."""
-        if self.ai_thinking:
+        if self.ai_thinking or self.animating_move:
             return
         if self.game.undo_last_round():
+            self._last_turn_signature = None
             self._update_state()
-            self.status_var.set("Round execution rolled back successfully.")
+            self._set_status("Round execution rolled back successfully.")
 
     def _reset_game(self):
         """Reset match configuration cleanly."""
@@ -568,6 +843,15 @@ class CheckersGUI:
             self.game.__init__(human_colour=self.game.human_colour,
                                ai_time=self.game.search.max_time,
                                ai_depth=self.game.search.max_depth)
+            self.selected_sq = None
+            self.valid_targets.clear()
+            self.display_board = None
+            self.preview_piece = None
+            self.preview_target_rc = None
+            self.animating_move = False
+            self.ai_thinking = False
+            self._last_turn_signature = None
+            self._game_over_logged = False
             self._update_state()
 
 
@@ -614,13 +898,17 @@ def run_console_game(game: CheckersGame):
             if parsed:
                 m = find_matching_move(parsed[0], parsed[1], legal_moves)
                 if m:
+                    game.log_decision("VALIDATE_HUMAN_MOVE", f"Accepted {m.to_notation()} as a legal move.")
                     game.apply_move(m)
                 else:
-                    print(f"  {C.RED}Illegal path chosen.{C.RESET}")
+                    attempted = f"{parsed[0]}-{parsed[1]}"
+                    game.log_decision("ILLEGAL_MOVE_RESPONSE", f"Rejected attempted move {attempted}.")
+                    print(f"  {C.RED}Illegal move attempted; board restored. Please choose again.{C.RESET}")
         else:
             print(f"  {C.YELLOW}🤖 AI thinking...{C.RESET}")
             stats = game.search.find_best_move(game.board, game.robot_colour)
             if stats.best_move:
+                game.log_decision("PLAN_ROBOT_MOVE", f"AI selected {stats.best_move.to_notation()}.")
                 print(f"  🤖 Engine plays: {stats.best_move.to_notation()}")
                 game.apply_move(stats.best_move)
             else:
