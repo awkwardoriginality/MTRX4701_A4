@@ -1,32 +1,33 @@
 #!/usr/bin/env python3
 """
-simulate_kinematics.py — Premium UR5e Checkers Virtual Environment Suite.
+simulate_kinematics.py — Standalone UR5e kinematics visualisation suite.
 
 Provides an advanced educational simulation GUI combining:
     1. Direct Forward Kinematics (FK) visualization using UR5e DH parameters.
     2. Real-time Numerical Inverse Kinematics (IK) via Jacobian pseudo-inverse.
-    3. Trajectory path verification mapping checkers coordinates to 3D link poses.
+    3. Trajectory path verification mapping board coordinates to 3D link poses.
     4. Interactive joint jogging sliders and live Cartesian telemetry dashboards.
-
-Grounds physical robot arm integration directly alongside game logic validation.
 """
 
 from __future__ import annotations
-import sys
-import os
+
 import math
+import os
+import sys
+from typing import List
+
 import numpy as np
-from typing import List, Tuple, Optional, Dict
 
 # Add parent directories for module paths
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from checkers_bot.game_engine.board import INTERNAL_TO_STANDARD, STANDARD_TO_INTERNAL, INTERNAL_TO_ROWCOL
+from checkers_bot.game_engine.board import STANDARD_TO_INTERNAL, INTERNAL_TO_ROWCOL
 from checkers_bot.manipulation.board_coordinates import BoardCoordinates
+from checkers_bot.manipulation.ur5e_kinematics import UR5eKinematics
 
 try:
     import tkinter as tk
-    from tkinter import ttk, messagebox
+    from tkinter import ttk
     HAS_TK = True
 except ImportError:
     HAS_TK = False
@@ -36,130 +37,9 @@ try:
     matplotlib.use('TkAgg')
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-    from mpl_toolkits.mplot3d import Axes3D
     HAS_MPL = True
 except ImportError:
     HAS_MPL = False
-
-
-# ─── UR5e Kinematics Core Engine ────────────────────────────────────────────
-
-class UR5eKinematics:
-    """Standard UR5e robot arm kinematics solver based on DH convention.
-
-    DH Table (standard convention):
-        Link | d (m)   | a (m)     | alpha (rad)
-        ────────────────────────────────────────
-        1    | 0.1625  | 0.0       |  pi/2
-        2    | 0.0     | -0.425    |  0.0
-        3    | 0.0     | -0.3922   |  0.0
-        4    | 0.1333  | 0.0       |  pi/2
-        5    | 0.0997  | 0.0       | -pi/2
-        6    | 0.0996  | 0.0       |  0.0
-    """
-
-    # Denavit-Hartenberg parameters
-    d = np.array([0.1625, 0.0, 0.0, 0.1333, 0.0997, 0.0996])
-    a = np.array([0.0, -0.425, -0.3922, 0.0, 0.0, 0.0])
-    alpha = np.array([math.pi/2, 0.0, 0.0, math.pi/2, -math.pi/2, 0.0])
-
-    @classmethod
-    def dh_matrix(cls, theta: float, d: float, a: float, alpha: float) -> np.ndarray:
-        """Construct standard DH homogeneous transformation matrix."""
-        ct = math.cos(theta)
-        st = math.sin(theta)
-        ca = math.cos(alpha)
-        sa = math.sin(alpha)
-
-        return np.array([
-            [ct, -st*ca,  st*sa, a*ct],
-            [st,  ct*ca, -ct*sa, a*st],
-            [0,   sa,     ca,    d   ],
-            [0,   0,      0,     1   ]
-        ])
-
-    @classmethod
-    def forward_kinematics(cls, joints: np.ndarray) -> Tuple[np.ndarray, List[np.ndarray]]:
-        """Compute end-effector pose and intermediate link frame origins.
-
-        Args:
-            joints: Array of 6 joint angles in radians.
-
-        Returns:
-            T_06: 4x4 matrix representing final tool flange pose.
-            origins: List of 3D vectors representing joint connection vertices.
-        """
-        origins = [np.array([0.0, 0.0, 0.0])]
-        T = np.eye(4)
-
-        for i in range(6):
-            A_i = cls.dh_matrix(joints[i], cls.d[i], cls.a[i], cls.alpha[i])
-            T = T @ A_i
-            origins.append(T[:3, 3])
-
-        # Add visual representation of parallel-jaw gripper finger tips
-        # TCP offset +Z in tool frame points straight out from flange
-        p_jaw1 = T @ np.array([0.0,  0.03, 0.15, 1.0])
-        p_jaw2 = T @ np.array([0.0, -0.03, 0.15, 1.0])
-        p_tcp  = T @ np.array([0.0,  0.0,  0.15, 1.0])
-
-        origins.append(p_tcp[:3])
-        origins.append(p_jaw1[:3])
-        origins.append(p_jaw2[:3])
-
-        return T, origins
-
-    @classmethod
-    def inverse_kinematics(cls, target_pos: np.ndarray, init_joints: np.ndarray,
-                           max_iter: int = 100, tol: float = 1e-4) -> Tuple[np.ndarray, bool]:
-        """Numerical Inverse Kinematics solver targeting specific Cartesian coordinates.
-
-        Uses iterative Jacobian pseudo-inverse optimization for smooth path mapping.
-        Assumes end-effector maintains downward operational posture.
-        """
-        # Forbid moving below the physical ground plane
-        safe_target = target_pos.copy()
-        if safe_target[2] < 0.005:
-            safe_target[2] = 0.005
-
-        q = np.array(init_joints, dtype=float).copy()
-
-        for _ in range(max_iter):
-            T_curr, _ = cls.forward_kinematics(q)
-            # Incorporate TCP tool tip projection offset
-            p_curr = (T_curr @ np.array([0.0, 0.0, 0.15, 1.0]))[:3]
-
-            err = safe_target - p_curr
-            if np.linalg.norm(err) < tol:
-                return q, True
-
-            # Compute numerical positional Jacobian (3x6)
-            J = np.zeros((3, 6))
-            delta = 1e-5
-            for j in range(6):
-                q_pert = q.copy()
-                q_pert[j] += delta
-                T_pert, _ = cls.forward_kinematics(q_pert)
-                p_pert = (T_pert @ np.array([0.0, 0.0, 0.15, 1.0]))[:3]
-                J[:, j] = (p_pert - p_curr) / delta
-
-            # Damped least squares pseudo-inverse step update
-            lam = 0.01
-            J_pinv = J.T @ np.linalg.inv(J @ J.T + lam**2 * np.eye(3))
-            dq = J_pinv @ err
-
-            q += dq
-
-            # Enforce joint configuration bounds to avoid floor clipping
-            T_check, origins_check = cls.forward_kinematics(q)
-            for pt in origins_check[1:]:
-                if pt[2] < 0.0:
-                    # Apply a soft restorative lift perturbation to joints influencing Z
-                    q[1] -= 0.01
-                    q[2] += 0.01
-
-        return q, False
-
 
 # ─── Virtual Simulation Visualizer Application ──────────────────────────────
 
@@ -340,7 +220,7 @@ class KinematicsEnvironmentApp:
                         color="#FF1493", s=100, marker='*', label="Kinematic Target")
 
         # 2. Compute and plot Forward Kinematics chains
-        T_flange, origins = UR5eKinematics.forward_kinematics(self.current_joints)
+        _, origins = UR5eKinematics.forward_kinematics(self.current_joints)
         pts = np.array(origins)
 
         # Draw structural robotic joints and linkage arms
@@ -507,7 +387,7 @@ def main():
         return
 
     root = tk.Tk()
-    app = KinematicsEnvironmentApp(root)
+    KinematicsEnvironmentApp(root)
     root.mainloop()
 
 

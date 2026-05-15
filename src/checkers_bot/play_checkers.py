@@ -11,7 +11,7 @@ Features:
     - Validates all English checkers rules (mandatory captures, king promotion)
     - Full point-and-click move preview and piece selection highlighting
     - AI search hints, real-time evaluation scores, and game history logs
-    - Parallel-jaw gripper manipulation simulation compatibility
+    - Standalone gameplay with no dependency on the arm visualisation
 
 Usage:
     python3 play_checkers.py                  # launches point-and-click GUI
@@ -34,19 +34,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 
 from checkers_bot.game_engine.board import (
     Board, Move,
-    CB_BLACK, CB_WHITE, CB_MAN, CB_KING,
+    CB_BLACK, CB_WHITE,
     BLACK_MAN, BLACK_KING, WHITE_MAN, WHITE_KING,
-    FREE, OCCUPIED,
+    FREE,
     INTERNAL_TO_STANDARD, STANDARD_TO_INTERNAL,
-    INTERNAL_TO_ROWCOL, ROWCOL_TO_INTERNAL, PLAYABLE_SQUARES,
+    ROWCOL_TO_INTERNAL,
 )
 from checkers_bot.game_engine.move_generator import MoveGenerator
 from checkers_bot.game_engine.search import Search
-from checkers_bot.game_engine.evaluation import evaluate
 from checkers_bot.game_engine.rules import Rules
-from checkers_bot.manipulation.board_coordinates import BoardCoordinates
-from simulate_kinematics import UR5eKinematics
-import numpy as np
 
 try:
     import tkinter as tk
@@ -54,15 +50,6 @@ try:
     HAS_TKINTER = True
 except ImportError:
     HAS_TKINTER = False
-
-try:
-    import matplotlib
-    matplotlib.use('TkAgg')
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-    HAS_MPL = True
-except ImportError:
-    HAS_MPL = False
 
 
 # ─── ANSI Colour Codes (Terminal Mode) ──────────────────────────────────────
@@ -230,15 +217,15 @@ class CheckersGame:
 # ─── Premium Graphical User Interface (GUI Mode) ────────────────────────────
 
 class CheckersGUI:
-    """Stunning Point-and-Click Tkinter interface for the checkers demo."""
+    """Point-and-click Tkinter interface for the standalone checkers demo."""
 
     def __init__(self, root: tk.Tk, game: CheckersGame):
         self.root = root
         self.game = game
 
-        self.root.title("UR5e Checkers Bot — Premium Game Suite")
-        self.root.geometry("1450x750")
-        self.root.minsize(1200, 650)
+        self.root.title("English Checkers")
+        self.root.geometry("980x750")
+        self.root.minsize(900, 650)
 
         # Configure dark-mode inspired premium styling
         self.bg_base = "#1E1E1E"
@@ -257,12 +244,6 @@ class CheckersGUI:
         self.valid_targets: dict[int, Move] = {}  # destination_square -> Move object
         self.ai_thinking = False
 
-        # Digital Twin kinematics state
-        self.coords = BoardCoordinates()
-        self.current_joints = np.array([0.0, -1.5708, 1.5708, -1.5708, -1.5708, 0.0])
-        self.target_pos = np.array([0.5, 0.0, 0.2])
-        self.twin_animating = False
-
         self._setup_ui()
         self._update_state()
 
@@ -274,27 +255,16 @@ class CheckersGUI:
 
         # Left Frame: Board Canvas
         self.board_frame = tk.Frame(self.main_panes, bg=self.bg_base)
-        self.main_panes.add(self.board_frame, width=580)
+        self.main_panes.add(self.board_frame, width=650)
 
         self.canvas = tk.Canvas(self.board_frame, bg=self.bg_base, bd=0, highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<Configure>", self._on_resize)
         self.canvas.bind("<Button-1>", self._on_click)
 
-        # Middle Frame: 3D Robotic Arm Real-Time Digital Twin Viewport
-        self.twin_frame = tk.Frame(self.main_panes, bg=self.bg_base)
-        self.main_panes.add(self.twin_frame, width=580)
-
-        if HAS_MPL:
-            self.fig = plt.figure(figsize=(6, 6), facecolor=self.bg_base)
-            self.ax = self.fig.add_subplot(111, projection='3d')
-            self.ax.set_facecolor(self.bg_base)
-            self.twin_canvas = FigureCanvasTkAgg(self.fig, master=self.twin_frame)
-            self.twin_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
         # Right Frame: Statistics & Controls Sidebar
         self.sidebar = tk.Frame(self.main_panes, bg=self.bg_panel, bd=1, relief=tk.SUNKEN)
-        self.main_panes.add(self.sidebar, width=270)
+        self.main_panes.add(self.sidebar, width=300)
 
         # Custom heading styling
         title_font = font.Font(family="Helvetica", size=16, weight="bold")
@@ -452,8 +422,6 @@ class CheckersGUI:
                     self.canvas.create_text(x1+8, y2-8, text=str(std_num), font=("Helvetica", 8),
                                             fill="#A0A0A0" if is_dark else "")
 
-        self._draw_twin_scene()
-
     def _update_state(self):
         """Update side panel counters, evaluate turn legality, and drive AI states."""
         self.selected_sq = None
@@ -496,213 +464,15 @@ class CheckersGUI:
         self._draw_board()
 
         # Automatically execute AI thread if active
-        if not is_human and not self.ai_thinking and not self.twin_animating:
+        if not is_human and not self.ai_thinking:
             self.ai_thinking = True
             self.status_var.set("🤖 AI Engine Thinking...")
             self.root.update_idletasks()
             threading.Thread(target=self._run_ai_thread, daemon=True).start()
 
-    def _draw_twin_scene(self):
-        """Redraw live robot digital twin linkage chains and physical checkers board surface."""
-        if not HAS_MPL or not hasattr(self, 'ax'):
-            return
-
-        self.ax.clear()
-        self.ax.set_xlim(-0.2, 0.8)
-        self.ax.set_ylim(-0.5, 0.5)
-        self.ax.set_zlim(0.0, 0.8)
-
-        self.ax.set_xlabel('X (m)', color=self.fg_text)
-        self.ax.set_ylabel('Y (m)', color=self.fg_text)
-        self.ax.set_zlabel('Z (m)', color=self.fg_text)
-        self.ax.tick_params(colors=self.fg_text, labelsize=8)
-        self.ax.grid(True, color="#333333", linestyle=':', linewidth=0.5)
-        self.ax.view_init(elev=25, azim=-55)
-
-        # Draw calibrated checkers board ground plane
-        sq_m = self.coords.sq
-        for r in range(8):
-            for c in range(8):
-                is_dark = (r + c) % 2 == 0
-                c_color = "#5C3A21" if is_dark else "#DEB887"
-                pts_b = np.array([
-                    [c*sq_m, r*sq_m, 0.0, 1.0],
-                    [(c+1)*sq_m, r*sq_m, 0.0, 1.0],
-                    [(c+1)*sq_m, (r+1)*sq_m, 0.0, 1.0],
-                    [c*sq_m, (r+1)*sq_m, 0.0, 1.0]
-                ])
-                pts_w = (self.coords.T @ pts_b.T).T[:, :3]
-                self.ax.plot_trisurf(pts_w[:, 0], pts_w[:, 1], pts_w[:, 2], color=c_color, alpha=0.85 if is_dark else 0.4)
-
-        # Plot current forward kinematics link frames
-        T_flange, origins = UR5eKinematics.forward_kinematics(self.current_joints)
-        pts = np.array(origins)
-
-        for k in range(len(pts) - 1):
-            p1 = pts[k]
-            p2 = pts[k+1]
-            seg_color = "#FF0000" if (p1[2] < -0.005 or p2[2] < -0.005) else ("#007ACC" if k < 6 else "#FFA500")
-            lw = 5 if k < 6 else 3
-            self.ax.plot([p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]],
-                         color=seg_color, linewidth=lw, marker='o' if k < 6 else '',
-                         markersize=5, markerfacecolor="#FFFFFF")
-
-        # Jaw lines
-        jaw_color = "#32CD32"
-        self.ax.plot([pts[7, 0], pts[8, 0]], [pts[7, 1], pts[8, 1]], [pts[7, 2], pts[8, 2]], color=jaw_color, linewidth=3)
-        self.ax.plot([pts[7, 0], pts[9, 0]], [pts[7, 1], pts[9, 1]], [pts[7, 2], pts[9, 2]], color=jaw_color, linewidth=3)
-
-        # Draw all active checkers pieces in 3D sitting flat facing upwards
-        p_h = self.coords.piece_height
-        target_sq = getattr(self, 'twin_moving_to_sq', None)
-        p_tcp = pts[7]
-
-        angles = np.linspace(0, 2 * np.pi, 18)
-        cos_a = np.cos(angles)
-        sin_a = np.sin(angles)
-        radius = 0.0175  # 17.5mm radius (35mm physical checker token diameter)
-
-        for sq in PLAYABLE_SQUARES:
-            piece = self.game.board.b[sq]
-            if piece != FREE:
-                r, c = INTERNAL_TO_ROWCOL[sq]
-                cx_b = (c + 0.5) * sq_m
-                cy_b = (r + 0.5) * sq_m
-
-                # Determine if piece is currently lifted by the gripper (carried during trajectory)
-                is_carried = False
-                if getattr(self, 'twin_animating', False) and target_sq == sq:
-                    if p_tcp[2] > 0.015:
-                        is_carried = True
-                        # Draw checker token flat circle centered directly at tool center point tip
-                        pts_ring_w = np.zeros((18, 3))
-                        pts_ring_w[:, 0] = p_tcp[0] + radius * cos_a
-                        pts_ring_w[:, 1] = p_tcp[1] + radius * sin_a
-                        pts_ring_w[:, 2] = p_tcp[2] - 0.005
-                        center_w = np.array([p_tcp[0], p_tcp[1], p_tcp[2] - 0.005])
-
-                if not is_carried:
-                    # Transform standard perimeter points to world coordinates
-                    pts_ring_b = np.zeros((18, 4))
-                    pts_ring_b[:, 0] = cx_b + radius * cos_a
-                    pts_ring_b[:, 1] = cy_b + radius * sin_a
-                    pts_ring_b[:, 2] = p_h
-                    pts_ring_b[:, 3] = 1.0
-                    pts_ring_w = (self.coords.T @ pts_ring_b.T).T[:, :3]
-                    center_w = (self.coords.T @ np.array([cx_b, cy_b, p_h, 1.0]))[:3]
-
-                p_color = "#DC143C" if piece in (BLACK_MAN, BLACK_KING) else "#F8F8FF"
-                p_edge = "#8B0000" if piece in (BLACK_MAN, BLACK_KING) else "#A9A9A9"
-
-                # Plot the solid thick perimeter ring lying completely flat parallel to the board plane
-                self.ax.plot(pts_ring_w[:, 0], pts_ring_w[:, 1], pts_ring_w[:, 2], color=p_color, linewidth=3.5)
-
-                # Scatter a premium pip icon directly in the flat circle origin
-                m_size = 90 if piece in (BLACK_KING, WHITE_KING) else 50
-                m_style = '^' if piece in (BLACK_KING, WHITE_KING) else 'o'
-                self.ax.scatter(center_w[0], center_w[1], center_w[2], color=p_color, edgecolor=p_edge,
-                                s=m_size, marker=m_style, depthshade=True, linewidth=1.5)
-
-        self.fig.canvas.draw()
-
-    def _animate_physical_move(self, move: Move):
-        """Drive physical digital twin linkage chains through full Pick-and-Place sequence keyframes."""
-        if not HAS_MPL:
-            self.twin_animating = False
-            self._update_state()
-            return
-
-        self.twin_animating = True
-        self.status_var.set("🤖 Arm Executing AI Trajectory SAFELY...")
-        self.root.update_idletasks()
-
-        r_from, c_from = INTERNAL_TO_ROWCOL[move.from_sq]
-        r_to, c_to = INTERNAL_TO_ROWCOL[move.to_sq]
-
-        sequence = []
-
-        # 1. Moving checker sequence: transit hover -> approach -> grasp -> approach -> hover -> transit dest -> approach -> place -> approach -> hover
-        for wp in [
-            self.coords.hover_position(r_from, c_from),
-            self.coords.approach_position(r_from, c_from),
-            self.coords.grasp_position(r_from, c_from),
-            self.coords.approach_position(r_from, c_from),
-            self.coords.hover_position(r_from, c_from),
-            self.coords.hover_position(r_to, c_to),
-            self.coords.approach_position(r_to, c_to),
-            self.coords.grasp_position(r_to, c_to),
-            self.coords.approach_position(r_to, c_to),
-            self.coords.hover_position(r_to, c_to),
-        ]:
-            sequence.append((wp, move.to_sq))
-
-        # 2. Pick up each captured opponent checker safely and deposit to discard line
-        if getattr(move, 'captured_squares', []):
-            for idx, cap_sq in enumerate(move.captured_squares):
-                r_cap, c_cap = INTERNAL_TO_ROWCOL[cap_sq]
-                discard_p = self.coords.discard_position(idx)
-                discard_hover = discard_p.copy()
-                discard_hover[2] += self.coords.HOVER_HEIGHT
-
-                for wp in [
-                    self.coords.hover_position(r_cap, c_cap),
-                    self.coords.approach_position(r_cap, c_cap),
-                    self.coords.grasp_position(r_cap, c_cap),
-                    self.coords.approach_position(r_cap, c_cap),
-                    self.coords.hover_position(r_cap, c_cap),
-                    discard_hover,
-                    discard_p,
-                    discard_hover,
-                ]:
-                    sequence.append((wp, cap_sq))
-
-        # 3. Retract safely back to default home stance
-        sequence.append((self.coords.board_center(), None))
-
-        self._interpolate_twin_waypoints(sequence, 0)
-
-    def _interpolate_twin_waypoints(self, sequence: List[Tuple[np.ndarray, Optional[int]]], idx: int):
-        """Smoothly step digital twin TCP along successive Cartesian targets in straight lines to forbid table collisions."""
-        if idx >= len(sequence):
-            self.twin_animating = False
-            self.twin_moving_to_sq = None
-            self._update_state()
-            return
-
-        target_p, active_sq = sequence[idx]
-        self.twin_moving_to_sq = active_sq
-
-        # Find starting Cartesian TCP position from forward kinematics
-        T_curr, _ = UR5eKinematics.forward_kinematics(self.current_joints)
-        start_p = (T_curr @ np.array([0.0, 0.0, 0.15, 1.0]))[:3]
-        goal_p = target_p.copy()
-
-        # Enforce strict ground plane compliance bounds
-        if goal_p[2] < 0.005:
-            goal_p[2] = 0.005
-
-        steps = 12  # Slow, gentle, highly realistic Cartesian linear steps
-
-        def _step(s):
-            if s <= steps:
-                frac = s / float(steps)
-                inter_p = start_p + frac * (goal_p - start_p)
-                # Keep absolute clearance above table mesh plane along the entire path
-                if inter_p[2] < 0.005:
-                    inter_p[2] = 0.005
-
-                sol_q, success = UR5eKinematics.inverse_kinematics(inter_p, self.current_joints)
-                self.current_joints = sol_q.copy()
-                self._draw_twin_scene()
-                self.root.after(35, lambda: _step(s+1))
-            else:
-                self.root.after(50, lambda: self._interpolate_twin_waypoints(sequence, idx+1))
-
-        _step(1)
-
     def _on_click(self, event):
         """Map mouse clicks to grid tiles to preview paths or dispatch moves."""
-        if self.ai_thinking or self.twin_animating or self.game.current_turn != self.game.human_colour:
+        if self.ai_thinking or self.game.current_turn != self.game.human_colour:
             return
 
         # Translate canvas clicks to internal coordinates
@@ -755,8 +525,7 @@ class CheckersGUI:
                     time.sleep(sleep_needed)
                 self.game.apply_move(stats.best_move)
                 self.ai_thinking = False
-                self._draw_board()
-                self._animate_physical_move(stats.best_move)
+                self._update_state()
             else:
                 messagebox.showinfo("Game Over", "AI has no valid responses and resigns!")
                 self.ai_thinking = False
@@ -862,7 +631,7 @@ def run_console_game(game: CheckersGame):
 # ─── System Entry Integration Dispatcher ────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="UR5e Premium Checkers Interactive Demo Interface.")
+    parser = argparse.ArgumentParser(description="Standalone English checkers interactive demo.")
     parser.add_argument('--terminal', action='store_true', help="Launch interactive console mode instead of GUI.")
     parser.add_argument('--colour', '-c', choices=['black', 'red', 'white'], default='black', help="Player alignment.")
     parser.add_argument('--time', '-t', type=float, default=2.0, help="AI search budget duration (seconds).")
@@ -875,7 +644,7 @@ def main():
     # Launch GUI unless explicit terminal requested or Tk is unavailable
     if not args.terminal and HAS_TKINTER and os.environ.get('DISPLAY', True):
         root = tk.Tk()
-        app = CheckersGUI(root, game)
+        CheckersGUI(root, game)
         root.mainloop()
     else:
         run_console_game(game)
