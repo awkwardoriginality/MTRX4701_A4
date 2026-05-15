@@ -13,13 +13,11 @@ Usage:
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
 import os
 from ament_index_python.packages import get_package_share_directory
 
 
 def generate_launch_description():
-    pkg_dir = get_package_share_directory('checkers_bot')
     perception_pkg_dir = get_package_share_directory('perception')
 
     # Launch arguments
@@ -41,10 +39,10 @@ def generate_launch_description():
         executable='game_manager',
         name='game_manager',
         output='screen',
-        parameters=[
-            os.path.join(pkg_dir, 'config', 'robot_params.yaml'),
-            os.path.join(pkg_dir, 'config', 'board_params.yaml'),
-        ],
+        parameters=[{
+            'search_time': LaunchConfiguration('search_time'),
+            'human_colour': LaunchConfiguration('human_colour'),
+        }],
     )
 
     # Perception node

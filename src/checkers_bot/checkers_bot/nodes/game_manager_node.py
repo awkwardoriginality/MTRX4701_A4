@@ -51,23 +51,8 @@ class GameManagerNode:
         use_ros2: bool = True,
     ):
         self.use_ros2 = use_ros2 and HAS_ROS2
-
-        # Create the state machine
-        self.state_machine = GameStateMachine(
-            search_time=search_time,
-            human_colour=human_colour,
-        )
-
-        # Create the game context
-        self.ctx = GameContext()
-        self.ctx.human_colour = human_colour
-        self.ctx.robot_colour = CB_WHITE if human_colour == CB_BLACK else CB_BLACK
-
-        # Set up callbacks
-        self.state_machine.set_callbacks(
-            on_state_change=self._on_state_change,
-            on_manipulation_cmd=self._on_manipulation_cmd,
-        )
+        self.search_time = search_time
+        self.human_colour = human_colour
 
         # Pending manipulation commands
         self._pending_commands: list[ManipulationCommand] = []
@@ -81,6 +66,26 @@ class GameManagerNode:
             self._init_ros2()
         else:
             logger.info("Running without ROS2 — standalone mode")
+            self._configure_game(search_time, human_colour)
+
+    def _configure_game(self, search_time: float, human_colour: int):
+        """Create the state machine and context using the effective configuration."""
+        self.search_time = search_time
+        self.human_colour = human_colour
+
+        self.state_machine = GameStateMachine(
+            search_time=search_time,
+            human_colour=human_colour,
+        )
+
+        self.ctx = GameContext()
+        self.ctx.human_colour = human_colour
+        self.ctx.robot_colour = CB_WHITE if human_colour == CB_BLACK else CB_BLACK
+
+        self.state_machine.set_callbacks(
+            on_state_change=self._on_state_change,
+            on_manipulation_cmd=self._on_manipulation_cmd,
+        )
 
     def _init_ros2(self):
         """Initialize ROS2 node, publishers, subscribers, timers."""
@@ -89,6 +94,12 @@ class GameManagerNode:
 
         rclpy.init()
         self.node = Node('game_manager')
+        self.node.declare_parameter('search_time', self.search_time)
+        self.node.declare_parameter('human_colour', self.human_colour)
+
+        effective_search_time = float(self.node.get_parameter('search_time').value)
+        effective_human_colour = int(self.node.get_parameter('human_colour').value)
+        self._configure_game(effective_search_time, effective_human_colour)
 
         # ─── Publishers ──────────────────────────────────────────────────
         # Game status (state machine state + board summary)
