@@ -61,6 +61,7 @@ class GameManagerNode:
         self.required_stable_frames = 2
         self._command_counter = 0
         self._board_blocked = False
+        self._last_internal_board: list[int] | None = None
 
         if self.use_ros2:
             self._init_ros2()
@@ -231,6 +232,13 @@ class GameManagerNode:
     def _timer_callback(self):
         """Periodic callback — step the state machine."""
         self.state_machine.step(self.ctx)
+
+        internal_flat = self.ctx.board.to_flat64()
+        if internal_flat != self._last_internal_board:
+            self._last_internal_board = internal_flat[:]
+            board_msg = UInt8MultiArray()
+            board_msg.data = internal_flat
+            self.board_pub.publish(board_msg)
 
         # Publish status
         if HAS_ROS2:

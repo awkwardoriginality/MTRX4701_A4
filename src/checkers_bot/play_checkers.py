@@ -18,6 +18,7 @@ Usage:
     python3 play_checkers.py --terminal       # launches terminal CLI mode
     python3 play_checkers.py --colour white   # play as white
     python3 play_checkers.py --time 2.0       # AI search time budget
+    python3 play_checkers.py --ros-bridge     # GUI publishes board updates to ROS
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ import re
 import time
 import argparse
 import threading
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 # Add parent directory for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
@@ -43,6 +44,15 @@ from checkers_bot.game_engine.board import (
 from checkers_bot.game_engine.move_generator import MoveGenerator
 from checkers_bot.game_engine.search import Search
 from checkers_bot.game_engine.rules import Rules
+from checkers_bot.protocol import BoardStateReport, GameStatus, RobotInstruction
+
+try:
+    import rclpy
+    from rclpy.node import Node
+    from std_msgs.msg import Bool, String, UInt8MultiArray
+    HAS_ROS2 = True
+except ImportError:
+    HAS_ROS2 = False
 
 try:
     import tkinter as tk
@@ -201,6 +211,110 @@ def get_move_path_squares(move: Move) -> List[int]:
     return path
 
 
+class GuiRosBridge:
+    """Bridge the standalone GUI board state into the ROS checkers topics."""
+
+    def __init__(
+        self,
+        on_internal_board: Optional[Callable[[Board], None]] = None,
+        on_game_status: Optional[Callable[[GameStatus], None]] = None,
+        on_robot_instruction: Optional[Callable[[RobotInstruction], None]] = None,
+    ):
+        if not HAS_ROS2:
+            raise RuntimeError("ROS 2 Python bindings are not available for GUI bridge mode.")
+
+        rclpy.init(args=None)
+        self.node = Node('checkers_gui_bridge')
+        self._on_internal_board = on_internal_board
+        self._on_game_status = on_game_status
+        self._on_robot_instruction = on_robot_instruction
+        self._stable_count = 0
+        self._last_flat64: Optional[List[int]] = None
+
+        self.board_pub = self.node.create_publisher(
+            UInt8MultiArray, '/checkers/board_state', 10
+        )
+        self.report_pub = self.node.create_publisher(
+            String, '/checkers/board_state_report', 10
+        )
+        self.blocked_pub = self.node.create_publisher(
+            Bool, '/checkers/board_blocked', 10
+        )
+
+        self.node.create_subscription(
+            UInt8MultiArray, '/checkers/internal_board', self._internal_board_cb, 10
+        )
+        self.node.create_subscription(
+            String, '/checkers/game_status', self._game_status_cb, 10
+        )
+        self.node.create_subscription(
+            String, '/checkers/robot_instruction', self._robot_instruction_cb, 10
+        )
+
+        self._spin_thread = threading.Thread(target=self._spin, daemon=True)
+        self._spin_thread.start()
+
+    def _spin(self):
+        rclpy.spin(self.node)
+
+    def publish_board(self, board: Board, *, source: str):
+        """Publish the canonical board and a stable board-state report."""
+        flat64 = board.to_flat64()
+        if self._last_flat64 == flat64:
+            self._stable_count += 1
+        else:
+            self._last_flat64 = flat64[:]
+            self._stable_count = 1
+
+        board_msg = UInt8MultiArray()
+        board_msg.data = flat64
+        self.board_pub.publish(board_msg)
+
+        blocked_msg = Bool()
+        blocked_msg.data = False
+        self.blocked_pub.publish(blocked_msg)
+
+        report_msg = String()
+        report_msg.data = BoardStateReport(
+            flat64=flat64,
+            stable_count=max(self._stable_count, 2),
+            hand_present=False,
+            board_blocked=False,
+            confidence=1.0,
+            source=source,
+        ).to_json()
+        self.report_pub.publish(report_msg)
+
+    def _internal_board_cb(self, msg: UInt8MultiArray):
+        if self._on_internal_board is None:
+            return
+        self._on_internal_board(Board.from_flat64(list(msg.data)))
+
+    def _game_status_cb(self, msg: String):
+        if self._on_game_status is None:
+            return
+        try:
+            self._on_game_status(GameStatus.from_json(msg.data))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+
+    def _robot_instruction_cb(self, msg: String):
+        if self._on_robot_instruction is None:
+            return
+        try:
+            self._on_robot_instruction(RobotInstruction.from_json(msg.data))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+
+    def shutdown(self):
+        """Release ROS resources on GUI exit."""
+        if not HAS_ROS2:
+            return
+        self.node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
 # ─── Core Game Logic Controller ─────────────────────────────────────────────
 
 class CheckersGame:
@@ -274,15 +388,31 @@ class CheckersGame:
 
         return True
 
+    def sync_from_observed_board(self, observed_board: Board, mover_colour: int) -> Optional[Move]:
+        """Apply a legal observed board transition from an external authority."""
+        if self.board.boards_match(observed_board):
+            return None
+
+        is_legal, move = self.rules.validate_human_move(
+            self.board, observed_board, mover_colour
+        )
+        if not is_legal or move is None:
+            return None
+
+        self.apply_move(move)
+        return move
+
 
 # ─── Premium Graphical User Interface (GUI Mode) ────────────────────────────
 
 class CheckersGUI:
     """Point-and-click Tkinter interface for the standalone checkers demo."""
 
-    def __init__(self, root: tk.Tk, game: CheckersGame):
+    def __init__(self, root: tk.Tk, game: CheckersGame, ros_bridge_mode: bool = False):
         self.root = root
         self.game = game
+        self.ros_bridge_mode = ros_bridge_mode
+        self.ros_bridge: Optional[GuiRosBridge] = None
 
         self.root.title("English Checkers")
         self.root.geometry("1360x760")
@@ -312,9 +442,21 @@ class CheckersGUI:
         self.preview_target_rc: Optional[Tuple[int, int]] = None
         self._last_turn_signature: Optional[Tuple[int, int]] = None
         self._game_over_logged = False
+        self._last_ros_status_signature: Optional[Tuple[str, int, str]] = None
+        self._last_ros_instruction_signature: Optional[Tuple[str, str, Optional[str], int]] = None
 
+        if self.ros_bridge_mode:
+            self.ros_bridge = GuiRosBridge(
+                on_internal_board=lambda board: self.root.after(0, lambda: self._on_ros_internal_board(board)),
+                on_game_status=lambda status: self.root.after(0, lambda: self._on_ros_game_status(status)),
+                on_robot_instruction=lambda instr: self.root.after(0, lambda: self._on_ros_robot_instruction(instr)),
+            )
+
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._setup_ui()
         self._update_state()
+        if self.ros_bridge is not None:
+            self.root.after(200, lambda: self.ros_bridge.publish_board(self.game.board, source='gui_bridge_initial'))
 
     def _setup_ui(self):
         """Construct the board, controls, move history, and decision log panes."""
@@ -538,6 +680,59 @@ class CheckersGUI:
         self.game.log_decision(state, detail)
         self._refresh_logs()
 
+    def _publish_board_to_ros(self, source: str):
+        """Publish the current board through the GUI bridge when enabled."""
+        if self.ros_bridge is not None:
+            self.ros_bridge.publish_board(self.game.board, source=source)
+
+    def _on_ros_internal_board(self, board: Board):
+        """Mirror the game manager's authoritative board back into the GUI."""
+        if self.game.board.boards_match(board):
+            return
+
+        move = self.game.sync_from_observed_board(board, self.game.robot_colour)
+        if move is None:
+            self._log_decision("ROS_SYNC", "Received a ROS board update that could not be reconciled locally.")
+            return
+
+        self._log_decision("ROS_SYNC", f"Applied ROS robot move {move.to_notation()} to the GUI board.")
+        if move.is_promotion:
+            self._log_decision("ROS_SYNC", f"{move.to_notation()} promoted to a king via ROS state sync.")
+        self._update_state()
+
+    def _on_ros_game_status(self, status: GameStatus):
+        """Surface the state-machine snapshot in the decision log."""
+        signature = (status.state, status.move_number, status.current_turn)
+        if signature == self._last_ros_status_signature:
+            return
+        self._last_ros_status_signature = signature
+        self._log_decision(
+            "ROS_STATUS",
+            f"{status.state} | turn={status.current_turn} | move={status.move_number}",
+        )
+
+    def _on_ros_robot_instruction(self, instruction: RobotInstruction):
+        """Surface robot-instruction updates while the ROS game manager is active."""
+        signature = (
+            instruction.state,
+            instruction.summary,
+            instruction.active_command,
+            instruction.move_number,
+        )
+        if signature == self._last_ros_instruction_signature:
+            return
+        self._last_ros_instruction_signature = signature
+        summary = instruction.summary
+        if instruction.active_command:
+            summary += f" [{instruction.active_command}]"
+        self._log_decision("ROS_INSTRUCTION", summary)
+
+    def _on_close(self):
+        """Shutdown ROS bridge resources before closing the GUI."""
+        if self.ros_bridge is not None:
+            self.ros_bridge.shutdown()
+        self.root.destroy()
+
     def _select_square(self, sq: int):
         """Select a human piece and show all currently legal destinations."""
         self.selected_sq = sq
@@ -591,12 +786,15 @@ class CheckersGUI:
         self.preview_piece = None
         self.preview_target_rc = None
         self.animating_move = False
+        mover_colour = self.game.current_turn
         self.game.apply_move(move)
         if move.is_promotion:
             self._log_decision("CHECK_KING_PROMOTION", f"{move.to_notation()} reaches the back rank.")
             self._log_decision("PROMOTE_TO_KING", f"{move.to_notation()} promotes to a king.")
         else:
             self._log_decision("CHECK_KING_PROMOTION", f"No promotion follows {move.to_notation()}.")
+        if self.ros_bridge_mode and mover_colour == self.game.human_colour:
+            self._publish_board_to_ros('gui_bridge_human')
         self._update_state()
 
     def _animate_hop_move(self, move: Move, actor: str):
@@ -728,7 +926,12 @@ class CheckersGUI:
 
         # Enable/disable human inputs depending on turn ownership
         is_human = (self.game.current_turn == self.game.human_colour)
-        self.btn_undo.state(['!disabled'] if is_human and len(self.game.board_history) > 2 else ['disabled'])
+        if self.ros_bridge_mode:
+            self.btn_undo.state(['disabled'])
+            self.btn_reset.state(['disabled'])
+        else:
+            self.btn_undo.state(['!disabled'] if is_human and len(self.game.board_history) > 2 else ['disabled'])
+            self.btn_reset.state(['!disabled'])
 
         turn_signature = (self.game.move_number, self.game.current_turn)
         if turn_signature != self._last_turn_signature:
@@ -738,15 +941,25 @@ class CheckersGUI:
                     f"Awaiting {self.game.human_name}. {len(self.legal_moves_cache)} legal move(s) available.",
                 )
             else:
-                self._log_decision(
-                    "PLAN_ROBOT_MOVE",
-                    f"{self.game.robot_name} to move. Search starts from {len(self.legal_moves_cache)} legal move(s).",
-                )
+                if self.ros_bridge_mode:
+                    self._log_decision(
+                        "WAIT_ROBOT",
+                        f"Waiting for ROS state machine to execute {self.game.robot_name}'s turn.",
+                    )
+                else:
+                    self._log_decision(
+                        "PLAN_ROBOT_MOVE",
+                        f"{self.game.robot_name} to move. Search starts from {len(self.legal_moves_cache)} legal move(s).",
+                    )
             self._last_turn_signature = turn_signature
 
         self._draw_board()
 
         # Automatically execute AI thread if active
+        if self.ros_bridge_mode and not is_human:
+            self._set_status("ROS game manager is planning / executing the robot move...")
+            return
+
         if not is_human and not self.ai_thinking and not self.animating_move:
             self.ai_thinking = True
             self._set_status("🤖 AI Engine Thinking...")
@@ -828,6 +1041,9 @@ class CheckersGUI:
 
     def _undo_round(self):
         """Take back previous AI round sequence execution."""
+        if self.ros_bridge_mode:
+            self._set_status("Undo is disabled while ROS bridge mode is active.", error=True)
+            return
         if self.ai_thinking or self.animating_move:
             return
         if self.game.undo_last_round():
@@ -837,6 +1053,9 @@ class CheckersGUI:
 
     def _reset_game(self):
         """Reset match configuration cleanly."""
+        if self.ros_bridge_mode:
+            self._set_status("Reset is disabled while ROS bridge mode is active. Restart the app instead.", error=True)
+            return
         if self.ai_thinking:
             return
         if messagebox.askyesno("Confirm Reset", "Reset board to standard opening format?"):
@@ -923,8 +1142,12 @@ def main():
     parser.add_argument('--terminal', action='store_true', help="Launch interactive console mode instead of GUI.")
     parser.add_argument('--colour', '-c', choices=['black', 'red', 'white'], default='black', help="Player alignment.")
     parser.add_argument('--time', '-t', type=float, default=2.0, help="AI search budget duration (seconds).")
+    parser.add_argument('--ros-bridge', action='store_true',
+                        help="Publish GUI board updates to ROS and mirror robot moves from the ROS game manager.")
 
     args = parser.parse_args()
+    if args.terminal and args.ros_bridge:
+        parser.error("--ros-bridge requires GUI mode.")
     human_colour = CB_BLACK if args.colour in ('black', 'red') else CB_WHITE
 
     game = CheckersGame(human_colour=human_colour, ai_time=args.time)
@@ -932,7 +1155,7 @@ def main():
     # Launch GUI unless explicit terminal requested or Tk is unavailable
     if not args.terminal and HAS_TKINTER and os.environ.get('DISPLAY', True):
         root = tk.Tk()
-        CheckersGUI(root, game)
+        CheckersGUI(root, game, ros_bridge_mode=args.ros_bridge)
         root.mainloop()
     else:
         run_console_game(game)

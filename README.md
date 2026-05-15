@@ -50,6 +50,19 @@ Run only perception with the packaged configuration:
 ros2 run perception checkers_perception --ros-args --params-file src/perception/config/checkers_perception.yaml
 ```
 
+Use the standalone GUI as a no-camera fake perception source:
+
+```bash
+python3 src/checkers_bot/play_checkers.py --ros-bridge
+```
+
+In `--ros-bridge` mode:
+
+- the GUI publishes `/checkers/board_state`, `/checkers/board_state_report`, and `/checkers/board_blocked`
+- the ROS `game_manager` reacts as if perception had seen the board
+- the GUI mirrors robot moves back from `/checkers/internal_board`
+- local GUI AI is disabled so ROS remains the authority for robot turns
+
 Inspect the main coordination topics:
 
 ```bash
