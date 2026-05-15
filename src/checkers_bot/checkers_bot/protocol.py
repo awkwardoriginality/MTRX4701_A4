@@ -64,6 +64,7 @@ class GameStatus(JsonMessage):
     board_summary: str
     legal_move: Optional[str] = None
     winner: Optional[str] = None
+    error_message: Optional[str] = None
 
 
 @dataclass

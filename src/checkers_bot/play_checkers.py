@@ -702,14 +702,14 @@ class CheckersGUI:
 
     def _on_ros_game_status(self, status: GameStatus):
         """Surface the state-machine snapshot in the decision log."""
-        signature = (status.state, status.move_number, status.current_turn)
+        signature = (status.state, status.move_number, status.current_turn, status.error_message or "")
         if signature == self._last_ros_status_signature:
             return
         self._last_ros_status_signature = signature
-        self._log_decision(
-            "ROS_STATUS",
-            f"{status.state} | turn={status.current_turn} | move={status.move_number}",
-        )
+        detail = f"{status.state} | turn={status.current_turn} | move={status.move_number}"
+        if status.error_message:
+            detail += f" | error={status.error_message}"
+        self._log_decision("ROS_STATUS", detail)
 
     def _on_ros_robot_instruction(self, instruction: RobotInstruction):
         """Surface robot-instruction updates while the ROS game manager is active."""

@@ -190,9 +190,18 @@ class GameManagerNode:
             logger.warning(f"Invalid board state report received: {exc}")
             return
 
+        self.ingest_board_report(report)
+
+    def ingest_board_report(self, report: BoardStateReport):
+        """Feed a structured board-state report into the game manager."""
+        if len(report.flat64) != 64:
+            logger.warning("Ignoring board state report with invalid flat64 length: %s", len(report.flat64))
+            return
+
         self._board_blocked = report.board_blocked
         if report.board_blocked or report.hand_present:
             self._stable_board_count = 0
+            self._stable_board_data = None
             self.ctx.perceived_board = None
             return
 
@@ -200,6 +209,10 @@ class GameManagerNode:
 
     def _accept_stable_board(self, flat: list[int], stable_count: int | None = None):
         """Only expose perceived boards to the state machine once they are stable."""
+        if len(flat) != 64:
+            logger.warning("Ignoring board update with invalid flat64 length: %s", len(flat))
+            return
+
         if self._stable_board_data == flat:
             self._stable_board_count += 1
         else:
@@ -223,9 +236,15 @@ class GameManagerNode:
             logger.warning(f"Invalid manipulation result received: {exc}")
             return
 
+        self.process_manipulation_result(result)
+
+    def process_manipulation_result(self, result: ManipulationResult):
+        """Handle a structured manipulation result in both ROS and standalone tests."""
         if not result.success:
             self.ctx.error_message = result.detail or f"{result.command_type} failed"
             logger.error(f"Manipulation command failed: {self.ctx.error_message}")
+            self.state_machine.notify_manipulation_failed(self.ctx, self.ctx.error_message)
+            return
 
         self.state_machine.notify_manipulation_done()
 
@@ -250,6 +269,7 @@ class GameManagerNode:
                 board_summary=self.state_machine.rules.get_board_summary(self.ctx.board),
                 legal_move=self.ctx.current_move.to_notation() if self.ctx.current_move else None,
                 winner=self.ctx.winner,
+                error_message=self.ctx.error_message or None,
             ).to_json()
             self.status_pub.publish(status)
 

@@ -165,6 +165,15 @@ class GameStateMachine:
         """Called by the manipulation node when a command completes."""
         self._manipulation_done = True
 
+    def notify_manipulation_failed(self, ctx: GameContext, error_message: str):
+        """Abort any queued manipulation flow and enter the error state."""
+        ctx.error_message = error_message
+        ctx.command_queue.clear()
+        ctx.command_continuation = None
+        ctx.next_state_after_home = None
+        self._manipulation_done = True
+        self._transition(GameState.ERROR, ctx)
+
     def _transition(self, new_state: GameState, _ctx: GameContext):
         """Transition to a new state."""
         old_state = self.state
@@ -295,9 +304,15 @@ class GameStateMachine:
         }.get(self.state)
 
         if handler:
-            handler(ctx)
+            try:
+                handler(ctx)
+            except Exception as exc:  # pragma: no cover - defensive fail-safe
+                logger.exception("Unhandled exception while processing state %s", self.state.value)
+                ctx.error_message = f"{self.state.value}: {exc}"
+                self._transition(GameState.ERROR, ctx)
         else:
             logger.error(f"No handler for state {self.state}")
+            ctx.error_message = f"No handler for state {self.state.value}"
             self._transition(GameState.ERROR, ctx)
 
         if self._manipulation_done:
@@ -318,6 +333,11 @@ class GameStateMachine:
         ctx.winner = None
         ctx.total_discarded = 0
         ctx.move_history = []
+        ctx.error_message = ""
+        ctx.illegal_move_count = 0
+        ctx.command_queue.clear()
+        ctx.command_continuation = None
+        ctx.next_state_after_home = None
 
         logger.info(
             f"Game initialized. Human={_colour_name(ctx.human_colour)}, "
