@@ -1,5 +1,32 @@
 # MTRX4701_A4
 
+## UR5e simulation quick start
+
+Use these in separate terminals from the workspace root:
+
+Terminal 0 (one-time build or after code changes):
+
+	source /opt/ros/jazzy/setup.bash
+	colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
+
+Terminal 1 (UR driver with mock hardware):
+
+	source /opt/ros/jazzy/setup.bash
+	source install/setup.bash
+	ros2 launch ur_robot_driver ur_control.launch.py ur_type:=ur5e robot_ip:=192.168.0.10 use_mock_hardware:=true launch_rviz:=true
+
+Terminal 2 (MoveIt interface):
+
+	source /opt/ros/jazzy/setup.bash
+	source install/setup.bash
+	ros2 launch ur_moveit_config ur_moveit.launch.py ur_type:=ur5e launch_rviz:=true
+
+Terminal 3 (workspace bounding-box visualizer/script):
+
+	source /opt/ros/jazzy/setup.bash
+	source install/setup.bash
+	python3 bounding_box.py
+
 
 # To launch realsense camera and publish it as a ros topic
 ros2 launch realsense2_camera rs_launch.py
