@@ -43,6 +43,7 @@ from ..game_engine.board import (
     PLAYABLE_SQUARES, INTERNAL_TO_ROWCOL,
     WHITE_MAN, WHITE_KING, BLACK_MAN, BLACK_KING, FREE,
 )
+from ..protocol import BoardStateReport
 
 logger = logging.getLogger(__name__)
 
@@ -336,6 +337,9 @@ class PerceptionNode:
         self.board_pub = self.node.create_publisher(
             UInt8MultiArray, '/checkers/board_state', 10
         )
+        self.report_pub = self.node.create_publisher(
+            String, '/checkers/board_state_report', 10
+        )
         self.debug_pub = self.node.create_publisher(
             Image, '/checkers/perception_debug', 10
         )
@@ -343,6 +347,8 @@ class PerceptionNode:
         # Image buffers
         self.last_rgb: Optional[np.ndarray] = None
         self.last_depth: Optional[np.ndarray] = None
+        self._last_flat64: Optional[List[int]] = None
+        self._stable_count = 0
 
         # Timer to run perception at desired rate
         self.node.create_timer(1.0 / rate, self._timer_cb)
@@ -375,6 +381,21 @@ class PerceptionNode:
         msg = UInt8MultiArray()
         msg.data = flat64
         self.board_pub.publish(msg)
+
+        if self._last_flat64 == flat64:
+            self._stable_count += 1
+        else:
+            self._last_flat64 = flat64[:]
+            self._stable_count = 1
+
+        report = String()
+        report.data = BoardStateReport(
+            flat64=flat64,
+            stable_count=self._stable_count,
+            hand_present=False,
+            confidence=1.0 if any(flat64) else 0.0,
+        ).to_json()
+        self.report_pub.publish(report)
 
         # Publish debug visualization
         if debug_img is not None and self.debug_pub.get_subscription_count() > 0:

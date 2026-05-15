@@ -15,9 +15,12 @@ from __future__ import annotations
 import enum
 import logging
 from dataclasses import dataclass, field
-from typing import List, Optional, Callable, Any
+from typing import List, Optional, Callable
 
-from ..game_engine.board import Board, Move, CB_BLACK, CB_WHITE
+from ..game_engine.board import (
+    Board, Move, CB_BLACK, CB_WHITE,
+    INTERNAL_TO_ROWCOL, INTERNAL_TO_XY, XY_TO_INTERNAL,
+)
 from ..game_engine.rules import Rules
 from ..game_engine.search import Search, SearchStats
 
@@ -43,6 +46,7 @@ class GameState(enum.Enum):
     DISCARD_CAPTURED = "DISCARD_CAPTURED"
     CHECK_KING_PROMOTION = "CHECK_KING_PROMOTION"
     PROMOTE_TO_KING = "PROMOTE_TO_KING"
+    RETURN_HOME = "RETURN_HOME"
     GAME_OVER = "GAME_OVER"
     ERROR = "ERROR"
 
@@ -58,6 +62,7 @@ class ManipulationCommand:
         GRASP = "GRASP"
         RELEASE = "RELEASE"
         MOVE_TO = "MOVE_TO"
+        MOVE_HOME = "MOVE_HOME"
         FINGER_WAG = "FINGER_WAG"
 
     command_type: 'ManipulationCommand.Type'
@@ -104,6 +109,11 @@ class GameContext:
 
     # Move history
     move_history: List[str] = field(default_factory=list)
+
+    # Sequential manipulation dispatch
+    command_queue: List[ManipulationCommand] = field(default_factory=list)
+    command_continuation: Optional['GameState'] = None
+    next_state_after_home: Optional['GameState'] = None
 
 
 class GameStateMachine:
@@ -155,7 +165,7 @@ class GameStateMachine:
         """Called by the manipulation node when a command completes."""
         self._manipulation_done = True
 
-    def _transition(self, new_state: GameState, ctx: GameContext):
+    def _transition(self, new_state: GameState, _ctx: GameContext):
         """Transition to a new state."""
         old_state = self.state
         self.state = new_state
@@ -168,6 +178,82 @@ class GameStateMachine:
         self._manipulation_done = False
         if self._on_manipulation_cmd:
             self._on_manipulation_cmd(cmd)
+
+    def _queue_manipulations(
+        self,
+        ctx: GameContext,
+        commands: List[ManipulationCommand],
+        continuation: Optional[GameState] = None,
+    ):
+        """Queue a manipulation batch to be dispatched one command at a time."""
+        ctx.command_queue = list(commands)
+        ctx.command_continuation = continuation
+
+    def _dispatch_pending_manipulation(self, ctx: GameContext) -> bool:
+        """Dispatch the next queued command or finish the queued sequence."""
+        if ctx.command_queue:
+            self._emit_manipulation(ctx.command_queue.pop(0))
+            return True
+
+        if ctx.command_continuation is not None:
+            next_state = ctx.command_continuation
+            ctx.command_continuation = None
+            self._transition(next_state, ctx)
+            return True
+
+        return False
+
+    def _prepare_human_turn_handoff(self, ctx: GameContext):
+        """Prepare the state transition that happens after the robot returns home."""
+        ctx.current_turn = ctx.human_colour
+        ctx.current_move = None
+        ctx.robot_move = None
+        ctx.search_stats = None
+        ctx.perceived_board = None
+
+        game_over, winner = self.rules.is_game_over(ctx.board, ctx.current_turn)
+        if game_over:
+            ctx.game_over = True
+            ctx.winner = winner
+            ctx.next_state_after_home = GameState.GAME_OVER
+        else:
+            ctx.game_over = False
+            ctx.winner = None
+            ctx.next_state_after_home = GameState.WAIT_HUMAN_MOVE
+
+    def _reconstruct_capture_path(self, move: Move) -> List[int]:
+        """Recover landing squares for multi-hop captures when the engine stores only endpoints."""
+        if not move.is_capture:
+            return move.path_squares if move.path_squares else [move.from_sq, move.to_sq]
+
+        if move.path_squares and len(move.path_squares) > 2:
+            return move.path_squares
+
+        if not move.captured_squares:
+            return [move.from_sq, move.to_sq]
+
+        path = [move.from_sq]
+        current_sq = move.from_sq
+
+        for cap_sq in move.captured_squares:
+            current_xy = INTERNAL_TO_XY.get(current_sq)
+            captured_xy = INTERNAL_TO_XY.get(cap_sq)
+            if current_xy is None or captured_xy is None:
+                return [move.from_sq, move.to_sq]
+
+            dx = captured_xy[0] - current_xy[0]
+            dy = captured_xy[1] - current_xy[1]
+            landing_sq = XY_TO_INTERNAL.get((captured_xy[0] + dx, captured_xy[1] + dy))
+            if landing_sq is None:
+                return [move.from_sq, move.to_sq]
+
+            path.append(landing_sq)
+            current_sq = landing_sq
+
+        if path[-1] != move.to_sq:
+            path.append(move.to_sq)
+
+        return path
 
     def step(self, ctx: GameContext) -> GameState:
         """Execute one step of the state machine.
@@ -182,6 +268,9 @@ class GameStateMachine:
         """
         if not self._manipulation_done:
             return self.state  # Wait for manipulation to complete
+
+        if self._dispatch_pending_manipulation(ctx):
+            return self.state
 
         handler = {
             GameState.INIT: self._handle_init,
@@ -200,6 +289,7 @@ class GameStateMachine:
             GameState.DISCARD_CAPTURED: self._handle_discard_captured,
             GameState.CHECK_KING_PROMOTION: self._handle_check_king_promotion,
             GameState.PROMOTE_TO_KING: self._handle_promote_to_king,
+            GameState.RETURN_HOME: self._handle_return_home,
             GameState.GAME_OVER: self._handle_game_over,
             GameState.ERROR: self._handle_error,
         }.get(self.state)
@@ -209,6 +299,9 @@ class GameStateMachine:
         else:
             logger.error(f"No handler for state {self.state}")
             self._transition(GameState.ERROR, ctx)
+
+        if self._manipulation_done:
+            self._dispatch_pending_manipulation(ctx)
 
         return self.state
 
@@ -269,6 +362,7 @@ class GameStateMachine:
 
             # Switch turn and check game over
             ctx.current_turn = ctx.robot_colour
+            ctx.perceived_board = None
             game_over, winner = self.rules.is_game_over(ctx.board, ctx.current_turn)
 
             if game_over:
@@ -284,51 +378,24 @@ class GameStateMachine:
             self._transition(GameState.ILLEGAL_MOVE_RESPONSE, ctx)
 
     def _handle_illegal_move_response(self, ctx: GameContext):
-        """Wag finger at the human for an illegal move."""
-        logger.info("Executing finger wag gesture...")
-        self._emit_manipulation(ManipulationCommand(
-            command_type=ManipulationCommand.Type.FINGER_WAG,
-        ))
-        self._transition(GameState.UNDO_ILLEGAL, ctx)
+        """Queue an illegal-move response, then return the arm to a safe home pose."""
+        logger.info("Executing illegal-move response...")
+        ctx.perceived_board = None
+        self._queue_manipulations(
+            ctx,
+            [
+                ManipulationCommand(
+                    command_type=ManipulationCommand.Type.FINGER_WAG,
+                ),
+                ManipulationCommand(
+                    command_type=ManipulationCommand.Type.MOVE_HOME,
+                ),
+            ],
+            continuation=GameState.WAIT_HUMAN_MOVE,
+        )
 
     def _handle_undo_illegal(self, ctx: GameContext):
-        """Physically undo the illegal move on the board.
-
-        Compare perceived board with the expected board and move pieces back.
-        """
-        if ctx.perceived_board is None or ctx.previous_board is None:
-            self._transition(GameState.ERROR, ctx)
-            return
-
-        # Find differences and generate commands to restore
-        diffs = ctx.previous_board.diff(ctx.perceived_board)
-        logger.info(f"Restoring {len(diffs)} square(s) to undo illegal move")
-
-        # For each difference, we need to move pieces back
-        # This is simplified — a full implementation would plan the exact
-        # pick-place sequence based on which pieces moved where
-        for sq, expected_piece, actual_piece in diffs:
-            from ..game_engine.board import INTERNAL_TO_ROWCOL
-            row, col = INTERNAL_TO_ROWCOL[sq]
-
-            if actual_piece != 16 and expected_piece == 16:
-                # Piece appeared where it shouldn't be — remove it
-                self._emit_manipulation(ManipulationCommand(
-                    command_type=ManipulationCommand.Type.PICK,
-                    target_square=sq,
-                    target_row=row,
-                    target_col=col,
-                ))
-            elif actual_piece == 16 and expected_piece != 16:
-                # Piece missing — it will be placed back after picking
-                self._emit_manipulation(ManipulationCommand(
-                    command_type=ManipulationCommand.Type.PLACE,
-                    target_square=sq,
-                    target_row=row,
-                    target_col=col,
-                ))
-
-        # After undoing, go back to waiting
+        """Legacy compatibility state: immediately resume waiting for a valid human move."""
         ctx.perceived_board = None
         self._transition(GameState.WAIT_HUMAN_MOVE, ctx)
 
@@ -377,25 +444,8 @@ class GameStateMachine:
             self._transition(GameState.ERROR, ctx)
             return
 
-        from ..game_engine.board import INTERNAL_TO_ROWCOL
-
-        # Pick from source
         from_row, from_col = INTERNAL_TO_ROWCOL[move.from_sq]
-        self._emit_manipulation(ManipulationCommand(
-            command_type=ManipulationCommand.Type.PICK,
-            target_square=move.from_sq,
-            target_row=from_row,
-            target_col=from_col,
-        ))
-
-        # Place at destination
         to_row, to_col = INTERNAL_TO_ROWCOL[move.to_sq]
-        self._emit_manipulation(ManipulationCommand(
-            command_type=ManipulationCommand.Type.PLACE,
-            target_square=move.to_sq,
-            target_row=to_row,
-            target_col=to_col,
-        ))
 
         # Apply the move to internal board
         ctx.board.apply_move_inplace(move)
@@ -405,27 +455,98 @@ class GameStateMachine:
             f"{self.rules.format_move(move)}"
         )
 
-        self._transition(GameState.CHECK_KING_PROMOTION, ctx)
+        self._queue_manipulations(
+            ctx,
+            [
+                ManipulationCommand(
+                    command_type=ManipulationCommand.Type.PICK,
+                    target_square=move.from_sq,
+                    target_row=from_row,
+                    target_col=from_col,
+                ),
+                ManipulationCommand(
+                    command_type=ManipulationCommand.Type.PLACE,
+                    target_square=move.to_sq,
+                    target_row=to_row,
+                    target_col=to_col,
+                ),
+            ],
+            continuation=GameState.CHECK_KING_PROMOTION,
+        )
 
     def _handle_execute_capture(self, ctx: GameContext):
-        """Begin executing a capture move — pick up the moving piece."""
+        """Queue the full capture sequence so each manipulation completes before the next begins."""
         move = ctx.robot_move
         if move is None:
             self._transition(GameState.ERROR, ctx)
             return
 
-        from ..game_engine.board import INTERNAL_TO_ROWCOL
-
-        # Pick up the moving piece
         from_row, from_col = INTERNAL_TO_ROWCOL[move.from_sq]
-        self._emit_manipulation(ManipulationCommand(
-            command_type=ManipulationCommand.Type.PICK,
-            target_square=move.from_sq,
-            target_row=from_row,
-            target_col=from_col,
-        ))
+        commands = [
+            ManipulationCommand(
+                command_type=ManipulationCommand.Type.PICK,
+                target_square=move.from_sq,
+                target_row=from_row,
+                target_col=from_col,
+            )
+        ]
 
-        ctx.capture_path_index = 1  # Start from path[1] (path[0] is 'from')
+        capture_path = self._reconstruct_capture_path(move)
+        for sq in capture_path[1:-1]:
+            row, col = INTERNAL_TO_ROWCOL[sq]
+            commands.append(
+                ManipulationCommand(
+                    command_type=ManipulationCommand.Type.BOB,
+                    target_square=sq,
+                    target_row=row,
+                    target_col=col,
+                )
+            )
+
+        to_row, to_col = INTERNAL_TO_ROWCOL[move.to_sq]
+        commands.append(
+            ManipulationCommand(
+                command_type=ManipulationCommand.Type.PLACE,
+                target_square=move.to_sq,
+                target_row=to_row,
+                target_col=to_col,
+            )
+        )
+
+        for capture_index, cap_sq in enumerate(move.captured_squares):
+            cap_row, cap_col = INTERNAL_TO_ROWCOL[cap_sq]
+            commands.extend([
+                ManipulationCommand(
+                    command_type=ManipulationCommand.Type.PICK,
+                    target_square=cap_sq,
+                    target_row=cap_row,
+                    target_col=cap_col,
+                ),
+                ManipulationCommand(
+                    command_type=ManipulationCommand.Type.PLACE,
+                    target_square=-1,
+                    target_row=-1,
+                    target_col=-1,
+                    metadata={'discard_index': ctx.total_discarded + capture_index},
+                ),
+            ])
+
+        ctx.total_discarded += len(move.captured_squares)
+        ctx.board.apply_move_inplace(move)
+        ctx.move_number += 1
+        ctx.move_history.append(
+            f"{ctx.move_number}. {_colour_name(ctx.robot_colour)}: "
+            f"{self.rules.format_move(move)}"
+        )
+
+        self._queue_manipulations(
+            ctx,
+            commands,
+            continuation=GameState.CHECK_KING_PROMOTION,
+        )
+
+    def _handle_pick_piece(self, ctx: GameContext):
+        """Legacy compatibility state: capture picking is now queued in one batch."""
         self._transition(GameState.BOB_OVER_SQUARE, ctx)
 
     def _handle_bob_over_square(self, ctx: GameContext):
@@ -461,75 +582,12 @@ class GameStateMachine:
         self._transition(GameState.BOB_OVER_SQUARE, ctx)
 
     def _handle_place_piece(self, ctx: GameContext):
-        """Place the moving piece at its destination."""
-        move = ctx.robot_move
-        if move is None:
-            self._transition(GameState.ERROR, ctx)
-            return
-
-        from ..game_engine.board import INTERNAL_TO_ROWCOL
-
-        to_row, to_col = INTERNAL_TO_ROWCOL[move.to_sq]
-        self._emit_manipulation(ManipulationCommand(
-            command_type=ManipulationCommand.Type.PLACE,
-            target_square=move.to_sq,
-            target_row=to_row,
-            target_col=to_col,
-        ))
-
-        # Now discard captured pieces
-        if ctx.captured_pieces_to_discard:
-            ctx.discard_index = 0
-            self._transition(GameState.DISCARD_CAPTURED, ctx)
-        else:
-            # Apply move and check promotion
-            ctx.board.apply_move_inplace(move)
-            ctx.move_number += 1
-            ctx.move_history.append(
-                f"{ctx.move_number}. {_colour_name(ctx.robot_colour)}: "
-                f"{self.rules.format_move(move)}"
-            )
-            self._transition(GameState.CHECK_KING_PROMOTION, ctx)
+        """Legacy compatibility state: capture execution is queued in one batch."""
+        self._transition(GameState.CHECK_KING_PROMOTION, ctx)
 
     def _handle_discard_captured(self, ctx: GameContext):
-        """Pick up captured pieces and move them to the discard pile."""
-        if ctx.discard_index >= len(ctx.captured_pieces_to_discard):
-            # All captured pieces discarded — apply move and continue
-            move = ctx.robot_move
-            if move is not None:
-                ctx.board.apply_move_inplace(move)
-                ctx.move_number += 1
-                ctx.move_history.append(
-                    f"{ctx.move_number}. {_colour_name(ctx.robot_colour)}: "
-                    f"{self.rules.format_move(move)}"
-                )
-            self._transition(GameState.CHECK_KING_PROMOTION, ctx)
-            return
-
-        from ..game_engine.board import INTERNAL_TO_ROWCOL
-
-        cap_sq = ctx.captured_pieces_to_discard[ctx.discard_index]
-        cap_row, cap_col = INTERNAL_TO_ROWCOL[cap_sq]
-
-        # Pick up the captured piece
-        self._emit_manipulation(ManipulationCommand(
-            command_type=ManipulationCommand.Type.PICK,
-            target_square=cap_sq,
-            target_row=cap_row,
-            target_col=cap_col,
-        ))
-
-        # Place in discard pile
-        self._emit_manipulation(ManipulationCommand(
-            command_type=ManipulationCommand.Type.PLACE,
-            target_square=-1,  # -1 = discard pile
-            target_row=-1,
-            target_col=-1,
-            metadata={'discard_index': ctx.total_discarded + ctx.discard_index},
-        ))
-
-        ctx.discard_index += 1
-        ctx.total_discarded += 1
+        """Legacy compatibility state: capture discards are queued in one batch."""
+        self._transition(GameState.CHECK_KING_PROMOTION, ctx)
 
     def _handle_check_king_promotion(self, ctx: GameContext):
         """Check if the piece that just moved should be promoted to king."""
@@ -538,17 +596,8 @@ class GameStateMachine:
             self._transition(GameState.PROMOTE_TO_KING, ctx)
             return
 
-        # Switch turn and check game over
-        ctx.current_turn = ctx.human_colour
-        game_over, winner = self.rules.is_game_over(ctx.board, ctx.current_turn)
-
-        if game_over:
-            ctx.game_over = True
-            ctx.winner = winner
-            self._transition(GameState.GAME_OVER, ctx)
-        else:
-            ctx.perceived_board = None  # Reset perception
-            self._transition(GameState.WAIT_HUMAN_MOVE, ctx)
+        self._prepare_human_turn_handoff(ctx)
+        self._transition(GameState.RETURN_HOME, ctx)
 
     def _handle_promote_to_king(self, ctx: GameContext):
         """Physically crown the promoted piece.
@@ -560,8 +609,6 @@ class GameStateMachine:
             self._transition(GameState.ERROR, ctx)
             return
 
-        from ..game_engine.board import INTERNAL_TO_ROWCOL
-
         to_row, to_col = INTERNAL_TO_ROWCOL[move.to_sq]
 
         logger.info(
@@ -569,27 +616,31 @@ class GameStateMachine:
             f"(row={to_row}, col={to_col})"
         )
 
-        # Place a second piece on top for king promotion
-        self._emit_manipulation(ManipulationCommand(
-            command_type=ManipulationCommand.Type.PLACE,
-            target_square=move.to_sq,
-            target_row=to_row,
-            target_col=to_col,
-            is_king_stack=True,
-            metadata={'colour': ctx.robot_colour},
-        ))
+        self._prepare_human_turn_handoff(ctx)
+        self._queue_manipulations(
+            ctx,
+            [
+                ManipulationCommand(
+                    command_type=ManipulationCommand.Type.PLACE,
+                    target_square=move.to_sq,
+                    target_row=to_row,
+                    target_col=to_col,
+                    is_king_stack=True,
+                    metadata={'colour': ctx.robot_colour},
+                )
+            ],
+            continuation=GameState.RETURN_HOME,
+        )
 
-        # Switch turn and check game over
-        ctx.current_turn = ctx.human_colour
-        game_over, winner = self.rules.is_game_over(ctx.board, ctx.current_turn)
-
-        if game_over:
-            ctx.game_over = True
-            ctx.winner = winner
-            self._transition(GameState.GAME_OVER, ctx)
-        else:
-            ctx.perceived_board = None
-            self._transition(GameState.WAIT_HUMAN_MOVE, ctx)
+    def _handle_return_home(self, ctx: GameContext):
+        """Move the arm back to its safe default pose before waiting for the next event."""
+        next_state = ctx.next_state_after_home or GameState.WAIT_HUMAN_MOVE
+        ctx.next_state_after_home = None
+        self._queue_manipulations(
+            ctx,
+            [ManipulationCommand(command_type=ManipulationCommand.Type.MOVE_HOME)],
+            continuation=next_state,
+        )
 
     def _handle_game_over(self, ctx: GameContext):
         """Handle game over."""

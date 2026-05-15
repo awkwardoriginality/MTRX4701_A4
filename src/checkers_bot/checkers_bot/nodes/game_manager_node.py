@@ -14,12 +14,12 @@ All game logic, move validation, and AI planning run here.
 
 from __future__ import annotations
 import logging
+import json
 
 try:
     import rclpy
     from rclpy.node import Node
     from std_msgs.msg import String, Bool, UInt8MultiArray
-    from geometry_msgs.msg import PoseStamped, PoseArray
     HAS_ROS2 = True
 except ImportError:
     HAS_ROS2 = False
@@ -27,6 +27,10 @@ except ImportError:
 from ..game_engine.board import Board, CB_BLACK, CB_WHITE
 from ..state_machine.game_states import (
     GameStateMachine, GameContext, GameState, ManipulationCommand,
+)
+from ..protocol import (
+    BoardStateReport, GameStatus, ManipulationGoal,
+    ManipulationResult, RobotInstruction,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,6 +71,10 @@ class GameManagerNode:
 
         # Pending manipulation commands
         self._pending_commands: list[ManipulationCommand] = []
+        self._stable_board_data: list[int] | None = None
+        self._stable_board_count = 0
+        self.required_stable_frames = 2
+        self._command_counter = 0
 
         if self.use_ros2:
             self._init_ros2()
@@ -87,8 +95,16 @@ class GameManagerNode:
             String, '/checkers/game_status', 10
         )
 
-        # Manipulation commands
-        self.manip_pub = self.node.create_publisher(
+        # Debug / dashboard instruction stream
+        self.instruction_pub = self.node.create_publisher(
+            String, '/checkers/robot_instruction', 10
+        )
+
+        # Manipulation command stream
+        self.manip_goal_pub = self.node.create_publisher(
+            String, '/checkers/manipulation_goal', 10
+        )
+        self.manip_legacy_pub = self.node.create_publisher(
             String, '/checkers/manipulation_cmd', 10
         )
 
@@ -105,12 +121,24 @@ class GameManagerNode:
             self._board_state_callback,
             10,
         )
+        self.node.create_subscription(
+            String,
+            '/checkers/board_state_report',
+            self._board_state_report_callback,
+            10,
+        )
 
         # Manipulation done signal
         self.node.create_subscription(
             Bool,
             '/checkers/manipulation_done',
             self._manipulation_done_callback,
+            10,
+        )
+        self.node.create_subscription(
+            String,
+            '/checkers/manipulation_result',
+            self._manipulation_result_callback,
             10,
         )
 
@@ -124,12 +152,52 @@ class GameManagerNode:
         """Handle perceived board state from perception."""
         flat = list(msg.data)
         if len(flat) == 64:
+            self._accept_stable_board(flat)
+
+    def _board_state_report_callback(self, msg):
+        """Handle structured board-state reports from perception."""
+        try:
+            report = BoardStateReport.from_json(msg.data)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            logger.warning(f"Invalid board state report received: {exc}")
+            return
+
+        if report.hand_present:
+            self._stable_board_count = 0
+            return
+
+        self._accept_stable_board(report.flat64, stable_count=report.stable_count)
+
+    def _accept_stable_board(self, flat: list[int], stable_count: int | None = None):
+        """Only expose perceived boards to the state machine once they are stable."""
+        if self._stable_board_data == flat:
+            self._stable_board_count += 1
+        else:
+            self._stable_board_data = flat[:]
+            self._stable_board_count = 1
+
+        effective_stable_count = stable_count or self._stable_board_count
+        if effective_stable_count >= self.required_stable_frames:
             self.ctx.perceived_board = Board.from_flat64(flat)
 
     def _manipulation_done_callback(self, msg):
         """Handle manipulation completion signal."""
         if msg.data:
             self.state_machine.notify_manipulation_done()
+
+    def _manipulation_result_callback(self, msg):
+        """Handle structured manipulation results."""
+        try:
+            result = ManipulationResult.from_json(msg.data)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            logger.warning(f"Invalid manipulation result received: {exc}")
+            return
+
+        if not result.success:
+            self.ctx.error_message = result.detail or f"{result.command_type} failed"
+            logger.error(f"Manipulation command failed: {self.ctx.error_message}")
+
+        self.state_machine.notify_manipulation_done()
 
     def _timer_callback(self):
         """Periodic callback — step the state machine."""
@@ -138,33 +206,76 @@ class GameManagerNode:
         # Publish status
         if HAS_ROS2:
             status = String()
-            status.data = (
-                f"state={self.state_machine.state.value}, "
-                f"turn={_colour_name(self.ctx.current_turn)}, "
-                f"move={self.ctx.move_number}"
-            )
+            status.data = GameStatus(
+                state=self.state_machine.state.value,
+                move_number=self.ctx.move_number,
+                current_turn=_colour_name(self.ctx.current_turn),
+                board_summary=self.state_machine.rules.get_board_summary(self.ctx.board),
+                legal_move=self.ctx.current_move.to_notation() if self.ctx.current_move else None,
+                winner=self.ctx.winner,
+            ).to_json()
             self.status_pub.publish(status)
 
     def _on_state_change(self, old_state: GameState, new_state: GameState):
         """Callback when the state machine transitions."""
         logger.info(f"[GameManager] {old_state.value} → {new_state.value}")
+        if self.use_ros2 and HAS_ROS2:
+            msg = String()
+            msg.data = RobotInstruction(
+                state=new_state.value,
+                summary=f"{old_state.value} -> {new_state.value}",
+                move_number=self.ctx.move_number,
+                current_turn=_colour_name(self.ctx.current_turn),
+            ).to_json()
+            self.instruction_pub.publish(msg)
 
     def _on_manipulation_cmd(self, cmd: ManipulationCommand):
         """Callback when the state machine generates a manipulation command."""
         self._pending_commands.append(cmd)
 
         if self.use_ros2 and HAS_ROS2:
-            import json
-            msg = String()
-            msg.data = json.dumps({
-                'type': cmd.command_type.value,
-                'square': cmd.target_square,
-                'row': cmd.target_row,
-                'col': cmd.target_col,
-                'is_king_stack': cmd.is_king_stack,
-                'metadata': cmd.metadata,
+            self._command_counter += 1
+            goal = ManipulationGoal(
+                command_id=f"cmd-{self._command_counter}",
+                command_type=cmd.command_type.value,
+                square=cmd.target_square,
+                row=cmd.target_row,
+                col=cmd.target_col,
+                is_king_stack=cmd.is_king_stack,
+                metadata=cmd.metadata,
+            )
+
+            goal_msg = String()
+            goal_msg.data = goal.to_json()
+            self.manip_goal_pub.publish(goal_msg)
+
+            legacy_msg = String()
+            legacy_msg.data = json.dumps({
+                'command_id': goal.command_id,
+                'type': goal.command_type,
+                'square': goal.square,
+                'row': goal.row,
+                'col': goal.col,
+                'is_king_stack': goal.is_king_stack,
+                'metadata': goal.metadata,
             })
-            self.manip_pub.publish(msg)
+            self.manip_legacy_pub.publish(legacy_msg)
+
+            instruction_msg = String()
+            instruction_msg.data = RobotInstruction(
+                state=self.state_machine.state.value,
+                summary=f"Dispatch {cmd.command_type.value}",
+                move_number=self.ctx.move_number,
+                current_turn=_colour_name(self.ctx.current_turn),
+                active_command=cmd.command_type.value,
+                metadata={
+                    'command_id': goal.command_id,
+                    'square': goal.square,
+                    'row': goal.row,
+                    'col': goal.col,
+                },
+            ).to_json()
+            self.instruction_pub.publish(instruction_msg)
 
     def get_pending_commands(self) -> list[ManipulationCommand]:
         """Get and clear pending manipulation commands (for standalone mode)."""

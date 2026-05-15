@@ -52,6 +52,8 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+from ..protocol import ManipulationFeedback, ManipulationGoal, ManipulationResult
+
 
 # ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -451,6 +453,12 @@ class ManipulationNode:
         # ─── Subscribers ─────────────────────────────────────────────────
         self.node.create_subscription(
             String,
+            '/checkers/manipulation_goal',
+            self._goal_callback,
+            10,
+        )
+        self.node.create_subscription(
+            String,
             '/checkers/manipulation_cmd',
             self._cmd_callback,
             10,
@@ -459,6 +467,12 @@ class ManipulationNode:
         # ─── Publishers ──────────────────────────────────────────────────
         self.done_pub = self.node.create_publisher(
             Bool, '/checkers/manipulation_done', 10
+        )
+        self.feedback_pub = self.node.create_publisher(
+            String, '/checkers/manipulation_feedback', 10
+        )
+        self.result_pub = self.node.create_publisher(
+            String, '/checkers/manipulation_result', 10
         )
 
         self.ee_pub = self.node.create_publisher(
@@ -474,10 +488,20 @@ class ManipulationNode:
 
         logger.info("ManipulationNode initialized")
 
+    def _goal_callback(self, msg: String):
+        """Receive and queue a structured manipulation goal."""
+        try:
+            goal = ManipulationGoal.from_json(msg.data)
+            self._cmd_queue.append(goal.to_dict())
+            logger.info(f"Queued structured goal: {goal.command_type} [{goal.command_id}]")
+        except (TypeError, ValueError, json.JSONDecodeError) as e:
+            logger.error(f"Invalid manipulation goal JSON: {e}")
+
     def _cmd_callback(self, msg: String):
         """Receive and queue a manipulation command."""
         try:
             cmd = json.loads(msg.data)
+            cmd.setdefault('command_id', f"legacy-{len(self._cmd_queue) + 1}")
             self._cmd_queue.append(cmd)
             logger.info(f"Queued command: {cmd.get('type', 'unknown')}")
         except json.JSONDecodeError as e:
@@ -492,14 +516,16 @@ class ManipulationNode:
         cmd = self._cmd_queue.pop(0)
 
         try:
-            self._execute_command(cmd)
+            self._publish_feedback(cmd, stage='executing')
+            success, detail = self._execute_command(cmd)
         except Exception as e:
             logger.error(f"Command execution failed: {e}")
+            success, detail = False, str(e)
         finally:
             self._processing = False
-            self._signal_done()
+            self._signal_done(cmd, success, detail)
 
-    def _execute_command(self, cmd: dict):
+    def _execute_command(self, cmd: dict) -> Tuple[bool, str]:
         """Execute a single manipulation command.
 
         Command types:
@@ -512,6 +538,8 @@ class ManipulationNode:
             MOVE_TO — Move to a specific position
         """
         cmd_type = cmd.get('type', '')
+        if not cmd_type:
+            cmd_type = cmd.get('command_type', '')
         square = cmd.get('square', -1)
         row = cmd.get('row', 0)
         col = cmd.get('col', 0)
@@ -543,35 +571,76 @@ class ManipulationNode:
         if cmd_type == 'FINGER_WAG':
             logger.info("  Executing finger wag gesture (3 oscillations)")
             # Would call: self.executor.finger_wag_sequence()
+            return True, "Finger wag completed"
 
         elif cmd_type == 'PICK':
             logger.info(f"  Picking piece from ({row}, {col})")
+            return True, f"Picked piece from ({row}, {col})"
 
         elif cmd_type == 'PLACE':
             if square == -1:
                 discard_idx = metadata.get('discard_index', 0)
                 logger.info(f"  Placing piece in discard pile [{discard_idx}]")
+                return True, f"Placed piece in discard pile [{discard_idx}]"
             elif is_king_stack:
                 logger.info(f"  Stacking king piece at ({row}, {col})")
+                return True, f"Stacked king at ({row}, {col})"
             else:
                 logger.info(f"  Placing piece at ({row}, {col})")
+                return True, f"Placed piece at ({row}, {col})"
 
         elif cmd_type == 'BOB':
             logger.info(f"  Bobbing over ({row}, {col})")
+            return True, f"Bobbed over ({row}, {col})"
 
         elif cmd_type == 'GRASP':
             logger.info("  Activating grasp")
+            return True, "Grasp activated"
 
         elif cmd_type == 'RELEASE':
             logger.info("  Releasing grasp")
+            return True, "Grasp released"
 
-    def _signal_done(self):
+        elif cmd_type == 'MOVE_HOME':
+            logger.info("  Returning to safe home pose")
+            return True, "Returned to home pose"
+
+        logger.warning(f"  Unsupported command type: {cmd_type}")
+        return False, f"Unsupported command type: {cmd_type}"
+
+    def _publish_feedback(self, cmd: dict, stage: str, detail: str = ""):
+        """Publish action-like feedback for the current command."""
+        if not HAS_ROS2:
+            return
+
+        cmd_type = cmd.get('type') or cmd.get('command_type', 'unknown')
+        feedback = String()
+        feedback.data = ManipulationFeedback(
+            command_id=cmd.get('command_id', 'unknown'),
+            command_type=cmd_type,
+            stage=stage,
+            detail=detail,
+        ).to_json()
+        self.feedback_pub.publish(feedback)
+
+    def _signal_done(self, cmd: dict, success: bool, detail: str):
         """Signal that the current command is complete."""
         if HAS_ROS2:
+            self._publish_feedback(cmd, stage='done' if success else 'failed', detail=detail)
+
+            result_msg = String()
+            result_msg.data = ManipulationResult(
+                command_id=cmd.get('command_id', 'unknown'),
+                command_type=cmd.get('type') or cmd.get('command_type', 'unknown'),
+                success=success,
+                detail=detail,
+            ).to_json()
+            self.result_pub.publish(result_msg)
+
             msg = Bool()
-            msg.data = True
+            msg.data = success
             self.done_pub.publish(msg)
-        logger.info("  → Command complete")
+        logger.info(f"  -> Command complete ({'ok' if success else 'failed'}): {detail}")
 
     def run(self):
         """Run the manipulation node (blocking)."""
