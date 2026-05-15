@@ -1,103 +1,109 @@
-"""
-test_perception.py — Unit tests for the computer vision perception pipeline.
-
-Tests:
-    1. Instantiation of BoardPerception pipeline
-    2. Classification of square ROIs (Empty, Red/Black Man, White Man)
-    3. King differentiation via depth thresholds and concentric contours
-    4. Integration with synthetic images
-
-Run with:
-    pytest test/test_perception.py -v
-    or standalone:
-    python3 test/test_perception.py
-"""
+"""Unit tests for the integrated perception adapter."""
 
 import sys
 import os
 import numpy as np
+import cv2
 
-# Add parent directory to path for standalone testing
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# Add package roots for standalone testing
+CHECKERS_BOT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+PERCEPTION_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'perception'))
+sys.path.insert(0, CHECKERS_BOT_ROOT)
+sys.path.insert(0, PERCEPTION_ROOT)
 
 from checkers_bot.game_engine.board import (
-    WHITE_MAN, WHITE_KING, BLACK_MAN, BLACK_KING, FREE,
+    WHITE_MAN, WHITE_KING, BLACK_MAN, BLACK_KING,
 )
-from checkers_bot.nodes.perception_node import BoardPerception
+from perception.checkers_perception_node import CheckersPerceptionNode
+
+
+def _make_adapter():
+    """Create a non-ROS instance exposing the pure helper methods for tests."""
+    adapter = CheckersPerceptionNode.__new__(CheckersPerceptionNode)
+    adapter.green_lower = np.array([45, 80, 80], dtype=np.uint8)
+    adapter.green_upper = np.array([85, 255, 255], dtype=np.uint8)
+    adapter.purple_lower = np.array([105, 50, 50], dtype=np.uint8)
+    adapter.purple_upper = np.array([145, 255, 255], dtype=np.uint8)
+    adapter.piece_min_ratio = 0.18
+    adapter.king_height_threshold_mm = 9.0
+    adapter.green_man_value = BLACK_MAN
+    adapter.green_king_value = BLACK_KING
+    adapter.purple_man_value = WHITE_MAN
+    adapter.purple_king_value = WHITE_KING
+    adapter.cell_size = 100
+    adapter.top_row_is_white = True
+    return adapter
 
 
 def test_perception_initialization():
-    """Verify that the perception pipeline initializes with valid ranges."""
-    bp = BoardPerception(canonical_size=800)
-    assert bp.size == 800
-    assert bp.sq_size == 100
-    assert 'red_low' in bp.hsv_ranges
-    assert 'white' in bp.hsv_ranges
-    print("✓ Perception initialization verified")
+    """Verify the test adapter exposes the canonical piece mapping."""
+    adapter = _make_adapter()
+    assert adapter.green_man_value == BLACK_MAN
+    assert adapter.green_king_value == BLACK_KING
+    assert adapter.purple_man_value == WHITE_MAN
+    assert adapter.purple_king_value == WHITE_KING
 
 
 def test_classify_empty_square():
     """Test that an empty dark square is classified as 0."""
-    bp = BoardPerception(canonical_size=800)
-    # Synthetic dark brown background image (BGR)
+    adapter = _make_adapter()
     roi_bgr = np.full((100, 100, 3), (30, 50, 80), dtype=np.uint8)
-    piece = bp.classify_square(roi_bgr)
-    assert piece == 0, f"Expected empty square (0), got {piece}"
-    print("✓ Empty square classification correct")
+    roi_hsv = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
+    piece, label = adapter.classify_square(roi_hsv, roi_bgr, roi_depth=None)
+    assert piece == 0
+    assert label == "."
 
 
-def test_classify_red_man():
-    """Test classification of a Red/Black piece ROI."""
-    bp = BoardPerception(canonical_size=800)
-    # Synthetic image with a bright red circle in the center
+def test_classify_green_man():
+    """Test classification of a green piece ROI into canonical black-man semantics."""
+    adapter = _make_adapter()
     roi_bgr = np.full((100, 100, 3), (30, 50, 80), dtype=np.uint8)
-    import cv2
-    cv2.circle(roi_bgr, (50, 50), 30, (0, 0, 200), -1)  # BGR Red
+    cv2.circle(roi_bgr, (50, 50), 30, (0, 255, 0), -1)
+    roi_hsv = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
+    piece, label = adapter.classify_square(roi_hsv, roi_bgr, roi_depth=None)
+    assert piece == BLACK_MAN
+    assert label == "G"
 
-    piece = bp.classify_square(roi_bgr)
-    assert piece == BLACK_MAN, f"Expected BLACK_MAN ({BLACK_MAN}), got {piece}"
-    print("✓ Red/Black Man classification correct")
 
-
-def test_classify_white_man():
-    """Test classification of a White piece ROI."""
-    bp = BoardPerception(canonical_size=800)
+def test_classify_purple_man():
+    """Test classification of a purple piece ROI into canonical white-man semantics."""
+    adapter = _make_adapter()
     roi_bgr = np.full((100, 100, 3), (30, 50, 80), dtype=np.uint8)
-    import cv2
-    cv2.circle(roi_bgr, (50, 50), 30, (240, 240, 240), -1)  # BGR White
-
-    piece = bp.classify_square(roi_bgr)
-    assert piece == WHITE_MAN, f"Expected WHITE_MAN ({WHITE_MAN}), got {piece}"
-    print("✓ White Man classification correct")
+    cv2.circle(roi_bgr, (50, 50), 30, (255, 0, 255), -1)
+    roi_hsv = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
+    piece, label = adapter.classify_square(roi_hsv, roi_bgr, roi_depth=None)
+    assert piece == WHITE_MAN
+    assert label == "P"
 
 
 def test_classify_king_via_depth():
-    """Test King classification using average depth thresholds."""
-    bp = BoardPerception(canonical_size=800)
+    """Test king classification using the configured depth threshold."""
+    adapter = _make_adapter()
     roi_bgr = np.full((100, 100, 3), (30, 50, 80), dtype=np.uint8)
-    import cv2
-    cv2.circle(roi_bgr, (50, 50), 30, (0, 0, 200), -1)  # BGR Red
-
-    # Synthetic depth map where the piece region sits at Z = 12.5 mm
+    cv2.circle(roi_bgr, (50, 50), 30, (0, 255, 0), -1)
+    roi_hsv = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2HSV)
     roi_depth = np.zeros((100, 100), dtype=np.float32)
     cv2.circle(roi_depth, (50, 50), 30, 12.5, -1)
+    piece, label = adapter.classify_square(roi_hsv, roi_bgr, roi_depth=roi_depth)
+    assert piece == BLACK_KING
+    assert label == "GK"
 
-    piece = bp.classify_square(roi_bgr, roi_depth=roi_depth)
-    assert piece == BLACK_KING, f"Expected BLACK_KING ({BLACK_KING}), got {piece}"
-    print("✓ King classification via depth correct")
+
+def test_board_to_flat64_respects_orientation():
+    """Top-row board coordinates should map into canonical bottom-origin flat64 form."""
+    adapter = _make_adapter()
+    board = np.zeros((8, 8), dtype=np.uint8)
+    board[0, 1] = WHITE_MAN
+    board[7, 6] = BLACK_MAN
+    flat64 = adapter.board_to_flat64(board)
+    assert flat64[7 * 8 + 1] == WHITE_MAN
+    assert flat64[0 * 8 + 6] == BLACK_MAN
 
 
 if __name__ == '__main__':
-    print("=" * 60)
-    print("PERCEPTION PIPELINE TESTS")
-    print("=" * 60)
-
     test_perception_initialization()
     test_classify_empty_square()
-    test_classify_red_man()
-    test_classify_white_man()
+    test_classify_green_man()
+    test_classify_purple_man()
     test_classify_king_via_depth()
-
-    print("\n" + "=" * 60)
-    print("ALL PERCEPTION TESTS PASSED ✓")
-    print("=" * 60)
+    test_board_to_flat64_respects_orientation()

@@ -74,6 +74,40 @@ The default colour mapping in `src/perception/config/checkers_perception.yaml` i
 
 If your physical board uses different colours, update the HSV thresholds and piece-code mapping in that YAML file.
 
+## Test Suite
+
+The integration branch has a focused automated suite for:
+
+- core game-engine behaviour
+- perception piece classification and board-orientation mapping
+- state-machine sequencing
+- ROS-facing topic payload contracts and blocked-board gating
+
+From the repository root:
+
+```bash
+pytest src/checkers_bot/test -v
+```
+
+For narrower checks:
+
+```bash
+pytest src/checkers_bot/test/test_game_engine.py -v
+pytest src/checkers_bot/test/test_perception.py -v
+pytest src/checkers_bot/test/test_state_machine_integration.py -v
+pytest src/checkers_bot/test/test_ros_topic_contracts.py -v
+```
+
+The ROS contract tests validate the JSON payloads and callback behaviour behind:
+
+- `/checkers/board_state_report`
+- `/checkers/board_blocked`
+- `/checkers/game_status`
+- `/checkers/robot_instruction`
+- `/checkers/manipulation_goal`
+- `/checkers/manipulation_feedback`
+- `/checkers/manipulation_result`
+
 ## Repository Structure
 
 - `src/checkers_bot/checkers_bot/game_engine/`: pure Python checkers logic
