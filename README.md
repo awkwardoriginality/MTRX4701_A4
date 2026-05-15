@@ -23,6 +23,8 @@ ros2 topic echo /game/status
 ros2 topic pub /game/robot_done std_msgs/msg/Bool "{data: true}" --once
 
 
+----------------------------------------------------------------------
+
 Camera image
 → detect 4 ArUco tags
 → warp board to 800x800
@@ -40,3 +42,95 @@ cd ~/realsense_ws
 rosdep install -i --from-path src --rosdistro jazzy -y
 colcon build --symlink-install
 source install/setup.bash
+
+----------------------------------------------------------------------
+
+### Robotic control in SIMULATION
+
+## To launch the UR5e Controller
+ros2 launch ur_robot_driver ur_control.launch.py \
+ur_type:=ur5e \
+use_mock_hardware:=true \
+robot_ip:=0.0.0.0
+
+## To launch moveit
+ros2 launch ur_moveit_config ur_moveit.launch.py \
+ur_type:=ur5e \
+launch_rviz:=true
+
+## To attach gripper arm
+ros2 launch ur5e_manoeuvring gripper_attached.launch.py
+
+In RViz, add second RobotModel:
+Description Topic: /gripper/robot_description
+
+## To add a checker board
+ros2 run ur5e_manoeuvring chessboard_marker_node --ros-args \
+-p origin_x:=0.30 \
+-p origin_y:=-0.20 \
+-p origin_z:=0.00 \
+-p square_size:=0.05 \
+-p rotation_steps:=1
+
+## To add a bounding box
+ros2 run ur5e_manoeuvring bounding_box_node
+----------------------------------------------------------------------
+
+### Robotic Control in HARDWARE
+
+ros2 launch ur_robot_driver ur_control.launch.py \
+ur_type:=ur5e \
+robot_ip:=<UR5E_IP_ADDRESS>
+
+ros2 launch ur_moveit_config ur_moveit.launch.py \
+ur_type:=ur5e \
+launch_rviz:=true
+
+ros2 launch ur5e_manoeuvring gripper_attached.launch.py \
+use_fake_hardware:=false \
+tty_port:=/dev/ttyUSB0
+
+ros2 run ur5e_manoeuvring bounding_box_node
+
+----------------------------------------------------------------------
+
+## Commands to test arm directly
+ros2 action send_goal \
+/scaled_joint_trajectory_controller/follow_joint_trajectory \
+control_msgs/action/FollowJointTrajectory \
+"{
+  trajectory: {
+    joint_names: [
+      shoulder_pan_joint,
+      shoulder_lift_joint,
+      elbow_joint,
+      wrist_1_joint,
+      wrist_2_joint,
+      wrist_3_joint
+    ],
+    points: [
+      {
+        positions: [0.0, -1.57, 0.0, -1.57, 0.0, 0.0],
+        time_from_start: {sec: 3}
+      }
+    ]
+  }
+}"
+
+ros2 action send_goal \
+/gripper/gripper_action_controller/gripper_cmd \
+control_msgs/action/ParallelGripperCommand \
+"command:
+  position: [0.0]
+"
+
+ros2 action send_goal \
+/gripper/gripper_action_controller/gripper_cmd \
+control_msgs/action/ParallelGripperCommand \
+"command:
+  position: [0.025]
+"
+
+# Command to test IK (Just telling the arm where to go)
+ros2 topic pub --once /ur5e_cartesian_goal std_msgs/msg/String \
+"{data: '{\"x\":0.35,\"y\":0.0,\"z\":0.35,\"roll\":3.14,\"pitch\":0.0,\"yaw\":0.0,\"gripper\":0.025,\"time\":4.0}'}"
