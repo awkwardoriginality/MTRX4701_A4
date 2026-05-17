@@ -47,24 +47,26 @@ source install/setup.bash
 
 ### Robotic control in SIMULATION
 
-## To launch the UR5e Controller
+#### To launch the UR5e Controller
 ros2 launch ur_robot_driver ur_control.launch.py \
 ur_type:=ur5e \
 use_mock_hardware:=true \
 robot_ip:=0.0.0.0
 
-## To launch moveit
+#### To launch moveit
 ros2 launch ur_moveit_config ur_moveit.launch.py \
 ur_type:=ur5e \
 launch_rviz:=true
 
-## To attach gripper arm
+#### To attach gripper arm
+rosdep install -i --from-path src/robotiq_hande_description src/robotiq_hande_driver --rosdistro jazzy -y
+
 ros2 launch ur5e_manoeuvring gripper_attached.launch.py
 
 In RViz, add second RobotModel:
 Description Topic: /gripper/robot_description
 
-## To add a checker board
+#### To add a checker board
 ros2 run ur5e_manoeuvring chessboard_marker_node --ros-args \
 -p origin_x:=0.30 \
 -p origin_y:=-0.20 \
@@ -78,10 +80,12 @@ origin_z         # board height relative to base_link (metres)
 square_size      # checkerboard square size (metres) -> 0.05 = 5 cm
 rotation_steps   # board rotation: 0=0°, 1=90°, 2=180°, 3=270°
 
-## To add a bounding box
+#### To add a bounding box
 ros2 run ur5e_manoeuvring bounding_box_node
 
-## To run cartesian goal sending node
+#### To run cartesian goal sending node
+sudo apt install ros-jazzy-tf-transformations
+
 ros2 run ur5e_manoeuvring ur5e_cartesian_node
 ----------------------------------------------------------------------
 
