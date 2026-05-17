@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="hande_attached_to_tool0">
+
+  <xacro:arg name="tf_prefix" default=""/>
+
+  <!-- This link already exists from the UR5e robot.
+       We define it here as the parent/root for this small gripper-only model. -->
+  <link name="tool0"/>
+
+  <xacro:include filename="$(find robotiq_hande_description)/urdf/robotiq_hande_gripper.xacro"/>
+
+  <xacro:robotiq_hande_gripper
+    name="robotiq_hande"
+    prefix=""
+    parent="tool0"
+    grip_pos_min="0.0"
+    grip_pos_max="0.025"
+    tty_port="/tmp/ttyUR"
+    baudrate="115200"
+    parity="N"
+    data_bits="8"
+    stop_bit="1"
+    slave_id="9"
+    use_fake_hardware="true"/>
+
+</robot>
