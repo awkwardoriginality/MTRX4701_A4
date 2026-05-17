@@ -1,0 +1,214 @@
+"""
+game_manager_node.py — Central ROS2 node orchestrating the checkers game.
+
+This node:
+    1. Subscribes to /checkers/board_state (from perception)
+    2. Runs the game state machine
+    3. Publishes manipulation commands to /checkers/manipulation_cmd
+    4. Subscribes to /checkers/manipulation_done (from manipulation node)
+    5. Publishes game status to /checkers/game_status
+
+The game manager is the single source of truth for the game state.
+All game logic, move validation, and AI planning run here.
+"""
+
+from __future__ import annotations
+import logging
+
+try:
+    import rclpy
+    from rclpy.node import Node
+    from std_msgs.msg import String, Bool, UInt8MultiArray
+    from geometry_msgs.msg import PoseStamped, PoseArray
+    HAS_ROS2 = True
+except ImportError:
+    HAS_ROS2 = False
+
+from ..game_engine.board import Board, CB_BLACK, CB_WHITE
+from ..state_machine.game_states import (
+    GameStateMachine, GameContext, GameState, ManipulationCommand,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class GameManagerNode:
+    """ROS2 node managing the checkers game state machine.
+
+    When running with ROS2, this wraps the state machine in a ROS2 node
+    with proper topics and timers. Without ROS2 (for testing), it can
+    be used standalone.
+    """
+
+    def __init__(
+        self,
+        search_time: float = 5.0,
+        human_colour: int = CB_BLACK,
+        use_ros2: bool = True,
+    ):
+        self.use_ros2 = use_ros2 and HAS_ROS2
+
+        # Create the state machine
+        self.state_machine = GameStateMachine(
+            search_time=search_time,
+            human_colour=human_colour,
+        )
+
+        # Create the game context
+        self.ctx = GameContext()
+        self.ctx.human_colour = human_colour
+        self.ctx.robot_colour = CB_WHITE if human_colour == CB_BLACK else CB_BLACK
+
+        # Set up callbacks
+        self.state_machine.set_callbacks(
+            on_state_change=self._on_state_change,
+            on_manipulation_cmd=self._on_manipulation_cmd,
+        )
+
+        # Pending manipulation commands
+        self._pending_commands: list[ManipulationCommand] = []
+
+        if self.use_ros2:
+            self._init_ros2()
+        else:
+            logger.info("Running without ROS2 — standalone mode")
+
+    def _init_ros2(self):
+        """Initialize ROS2 node, publishers, subscribers, timers."""
+        if not HAS_ROS2:
+            return
+
+        rclpy.init()
+        self.node = Node('game_manager')
+
+        # ─── Publishers ──────────────────────────────────────────────────
+        # Game status (state machine state + board summary)
+        self.status_pub = self.node.create_publisher(
+            String, '/checkers/game_status', 10
+        )
+
+        # Manipulation commands
+        self.manip_pub = self.node.create_publisher(
+            String, '/checkers/manipulation_cmd', 10
+        )
+
+        # Board state (internal, for debugging)
+        self.board_pub = self.node.create_publisher(
+            UInt8MultiArray, '/checkers/internal_board', 10
+        )
+
+        # ─── Subscribers ─────────────────────────────────────────────────
+        # Perceived board state from perception node
+        self.node.create_subscription(
+            UInt8MultiArray,
+            '/checkers/board_state',
+            self._board_state_callback,
+            10,
+        )
+
+        # Manipulation done signal
+        self.node.create_subscription(
+            Bool,
+            '/checkers/manipulation_done',
+            self._manipulation_done_callback,
+            10,
+        )
+
+        # ─── Timer ───────────────────────────────────────────────────────
+        # Run state machine at 10 Hz
+        self.timer = self.node.create_timer(0.1, self._timer_callback)
+
+        logger.info("Game manager ROS2 node initialized")
+
+    def _board_state_callback(self, msg):
+        """Handle perceived board state from perception."""
+        flat = list(msg.data)
+        if len(flat) == 64:
+            self.ctx.perceived_board = Board.from_flat64(flat)
+
+    def _manipulation_done_callback(self, msg):
+        """Handle manipulation completion signal."""
+        if msg.data:
+            self.state_machine.notify_manipulation_done()
+
+    def _timer_callback(self):
+        """Periodic callback — step the state machine."""
+        self.state_machine.step(self.ctx)
+
+        # Publish status
+        if HAS_ROS2:
+            status = String()
+            status.data = (
+                f"state={self.state_machine.state.value}, "
+                f"turn={_colour_name(self.ctx.current_turn)}, "
+                f"move={self.ctx.move_number}"
+            )
+            self.status_pub.publish(status)
+
+    def _on_state_change(self, old_state: GameState, new_state: GameState):
+        """Callback when the state machine transitions."""
+        logger.info(f"[GameManager] {old_state.value} → {new_state.value}")
+
+    def _on_manipulation_cmd(self, cmd: ManipulationCommand):
+        """Callback when the state machine generates a manipulation command."""
+        self._pending_commands.append(cmd)
+
+        if self.use_ros2 and HAS_ROS2:
+            import json
+            msg = String()
+            msg.data = json.dumps({
+                'type': cmd.command_type.value,
+                'square': cmd.target_square,
+                'row': cmd.target_row,
+                'col': cmd.target_col,
+                'is_king_stack': cmd.is_king_stack,
+                'metadata': cmd.metadata,
+            })
+            self.manip_pub.publish(msg)
+
+    def get_pending_commands(self) -> list[ManipulationCommand]:
+        """Get and clear pending manipulation commands (for standalone mode)."""
+        cmds = self._pending_commands[:]
+        self._pending_commands.clear()
+        return cmds
+
+    def update_perceived_board(self, board: Board):
+        """Update the perceived board state (for standalone mode)."""
+        self.ctx.perceived_board = board
+
+    def step(self) -> GameState:
+        """Step the state machine (for standalone mode)."""
+        return self.state_machine.step(self.ctx)
+
+    def run(self):
+        """Run the ROS2 node (blocking)."""
+        if self.use_ros2 and HAS_ROS2:
+            rclpy.spin(self.node)
+        else:
+            logger.warning("Cannot run spin loop — ROS2 not available")
+
+    def shutdown(self):
+        """Shutdown the node."""
+        if self.use_ros2 and HAS_ROS2:
+            self.node.destroy_node()
+            rclpy.shutdown()
+
+
+def _colour_name(colour: int) -> str:
+    return "black" if colour == CB_BLACK else "white"
+
+
+def main():
+    """Entry point for the game manager node."""
+    logging.basicConfig(level=logging.INFO)
+    manager = GameManagerNode(search_time=5.0, human_colour=CB_BLACK)
+    try:
+        manager.run()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        manager.shutdown()
+
+
+if __name__ == '__main__':
+    main()
