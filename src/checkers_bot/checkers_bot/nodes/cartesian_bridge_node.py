@@ -76,8 +76,9 @@ _TRANSIT_DURATION  = 3.0   # speed >= 0.25 m/s
 _BOB_DURATION      = 3.5   # speed >= 0.12 m/s
 _APPROACH_DURATION = 4.0   # slow precision approach
 
-# ur5e_motion_status values that indicate a goal finished successfully
-_STATUS_DONE = frozenset({'GRIPPER_GOAL_ACCEPTED', 'ARM_MOVE_DONE'})
+# ur5e_motion_status values that mean the arm/gripper step finished
+_ARM_DONE  = 'ARM_MOVE_DONE'
+_GRIP_DONE = 'GRIPPER_GOAL_ACCEPTED'
 
 # ur5e_motion_status values that indicate a goal failed
 _STATUS_ERROR = frozenset({
@@ -172,7 +173,7 @@ class CartesianBridgeNode:
         self._active_goal: Optional[ManipulationGoal] = None
         self._active_motions: List[MotionCommand] = []
         self._motion_idx: int = 0
-        self._awaiting_status: bool = False
+        self._awaiting_for: Optional[str] = None  # 'arm' | 'gripper' | None
         self._wait_until: float = 0.0
         self._current_gripper: float = GRIPPER_OPEN
         self._last_xyz: List[float] = HOME_POSITION.tolist()
@@ -205,15 +206,18 @@ class CartesianBridgeNode:
         # Strip any trailing code (e.g. "ARM_MOVE_FAILED: -3" → "ARM_MOVE_FAILED")
         status = msg.data.split(':')[0].strip()
 
-        if status in _STATUS_DONE:
-            if self._awaiting_status:
-                self._awaiting_status = False
-                logger.info(f"  ✓ {msg.data}")
+        done = (
+            (self._awaiting_for == 'arm'     and status == _ARM_DONE) or
+            (self._awaiting_for == 'gripper' and status == _GRIP_DONE)
+        )
+        if done:
+            self._awaiting_for = None
+            logger.info(f"  ✓ {msg.data}")
 
         elif status in _STATUS_ERROR:
             logger.error(f"  Motion error: {msg.data}")
-            if self._awaiting_status and self._active_goal:
-                self._awaiting_status = False
+            if self._awaiting_for is not None and self._active_goal:
+                self._awaiting_for = None
                 goal = self._active_goal
                 self._reset_active_goal()
                 self._signal_done(goal, success=False, detail=msg.data)
@@ -221,7 +225,7 @@ class CartesianBridgeNode:
     # ─── 20 Hz tick ──────────────────────────────────────────────────────
 
     def _tick(self):
-        if self._awaiting_status:
+        if self._awaiting_for is not None:
             return
         if time.monotonic() < self._wait_until:
             return
@@ -251,7 +255,7 @@ class CartesianBridgeNode:
             xyz = cmd.position.tolist()
             self._last_xyz = xyz
             self._publish_cartesian(xyz, _motion_duration(cmd))
-            self._awaiting_status = True
+            self._awaiting_for = 'arm'
             self._motion_idx += 1
             logger.info(f"  MOVE_TO [{cmd.label}] → {[f'{v:.3f}' for v in xyz]}")
 
@@ -272,7 +276,7 @@ class CartesianBridgeNode:
     def _set_gripper(self, value: float, label: str):
         self._current_gripper = value
         self._publish_cartesian(self._last_xyz, duration=1.5)
-        self._awaiting_status = True
+        self._awaiting_for = 'gripper'
         self._motion_idx += 1
         logger.info(f"  {label}")
 
