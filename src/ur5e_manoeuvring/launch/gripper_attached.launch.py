@@ -4,7 +4,8 @@ from launch_ros.actions import Node
 from launch_ros.descriptions import ParameterValue
 from launch_ros.parameter_descriptions import ParameterFile
 from launch_ros.substitutions import FindPackageShare
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, RegisterEventHandler
+from launch.event_handlers import OnProcessExit
 from launch.substitutions import LaunchConfiguration
 
 
@@ -62,6 +63,8 @@ def generate_launch_description():
             "joint_state_broadcaster",
             "--controller-manager",
             "/gripper/controller_manager",
+            "--controller-manager-timeout",
+            "30",
         ],
         output="screen",
     )
@@ -73,6 +76,8 @@ def generate_launch_description():
             "gripper_action_controller",
             "--controller-manager",
             "/gripper/controller_manager",
+            "--controller-manager-timeout",
+            "30",
         ],
         output="screen",
     )
@@ -83,10 +88,17 @@ def generate_launch_description():
     description="Prefix for gripper joints/links",
 )
 
+    delay_gripper_controller = RegisterEventHandler(
+        event_handler=OnProcessExit(
+            target_action=joint_state_broadcaster_spawner,
+            on_exit=[gripper_controller_spawner],
+        )
+    )
+
     return LaunchDescription([
         tf_prefix_arg,
         gripper_state_publisher,
         gripper_control_node,
         joint_state_broadcaster_spawner,
-        gripper_controller_spawner,
+        delay_gripper_controller,
     ])

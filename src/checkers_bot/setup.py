@@ -30,6 +30,7 @@ setup(
         'console_scripts': [
             'game_manager = checkers_bot.nodes.game_manager_node:main',
             'manipulation = checkers_bot.nodes.manipulation_node:main',
+            'cartesian_bridge = checkers_bot.nodes.cartesian_bridge_node:main',
             'play_checkers = play_checkers:main',
         ],
     },

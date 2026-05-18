@@ -17,7 +17,7 @@ from moveit_msgs.msg import RobotState
 
 from trajectory_msgs.msg import JointTrajectoryPoint
 from control_msgs.action import FollowJointTrajectory
-from control_msgs.action import ParallelGripperCommand
+from control_msgs.action import GripperCommand
 
 from tf_transformations import quaternion_from_euler
 
@@ -69,7 +69,7 @@ class UR5eCartesianNode(Node):
 
         self.gripper_client = ActionClient(
             self,
-            ParallelGripperCommand,
+            GripperCommand,
             "/gripper/gripper_action_controller/gripper_cmd",
         )
 
@@ -240,8 +240,8 @@ class UR5eCartesianNode(Node):
             self.publish_status("GRIPPER_ACTION_NOT_AVAILABLE")
             return
 
-        goal = ParallelGripperCommand.Goal()
-        goal.command.position = [float(position)]
+        goal = GripperCommand.Goal()
+        goal.command.position = float(position)
 
         self.publish_status("SENDING_GRIPPER_GOAL")
 
