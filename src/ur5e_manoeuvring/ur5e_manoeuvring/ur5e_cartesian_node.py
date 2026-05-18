@@ -13,7 +13,9 @@ from sensor_msgs.msg import JointState
 from geometry_msgs.msg import PoseStamped
 
 from moveit_msgs.srv import GetPositionIK
-from moveit_msgs.msg import RobotState
+from moveit_msgs.msg import CollisionObject, PlanningScene, RobotState
+from geometry_msgs.msg import Pose
+from shape_msgs.msg import SolidPrimitive
 
 from trajectory_msgs.msg import JointTrajectoryPoint
 from control_msgs.action import FollowJointTrajectory
@@ -73,8 +75,40 @@ class UR5eCartesianNode(Node):
             "/gripper/gripper_action_controller/gripper_cmd",
         )
 
+        self._scene_pub = self.create_publisher(PlanningScene, "/planning_scene", 10)
+        # Publish the floor collision object once MoveIt has had time to start.
+        self._floor_timer = self.create_timer(2.0, self._add_floor_once)
+
         self.get_logger().info("UR5e Cartesian node ready.")
         self.get_logger().info("Publish JSON goals to /ur5e_cartesian_goal")
+
+    def _add_floor_once(self):
+        """Add a table-surface collision box to the MoveIt planning scene."""
+        self._floor_timer.cancel()
+
+        # 3 m × 3 m × 1 cm slab whose top face sits at z = 0 (base_link origin).
+        # The arm is mounted at z = 0, so this prevents IK solutions that would
+        # drive any link through the table.
+        box = SolidPrimitive(type=SolidPrimitive.BOX, dimensions=[3.0, 3.0, 0.01])
+
+        box_pose = Pose()
+        box_pose.position.z = -0.005  # top face at z = 0
+        box_pose.orientation.w = 1.0
+
+        floor = CollisionObject()
+        floor.header.frame_id = "base_link"
+        floor.header.stamp = self.get_clock().now().to_msg()
+        floor.id = "floor"
+        floor.operation = CollisionObject.ADD
+        floor.primitives = [box]
+        floor.primitive_poses = [box_pose]
+
+        scene = PlanningScene()
+        scene.is_diff = True
+        scene.world.collision_objects = [floor]
+
+        self._scene_pub.publish(scene)
+        self.get_logger().info("Floor collision object added to planning scene.")
 
     def joint_state_callback(self, msg):
         self.latest_joint_state = msg
@@ -148,7 +182,8 @@ class UR5eCartesianNode(Node):
         request.ik_request.pose_stamped = pose
         request.ik_request.ik_link_name = "tool0"
         request.ik_request.timeout = Duration(seconds=2.0).to_msg()
-        request.ik_request.avoid_collisions = False
+        # Ensure the IK solution itself is not in self-collision.
+        request.ik_request.avoid_collisions = True
 
         return request
 
