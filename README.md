@@ -210,18 +210,27 @@ ros2 run ur5e_manoeuvring ur5e_cartesian_node
 ---
 
 ### Running Cartesian Bridge
+```bash
 ros2 run checkers_bot cartesian_bridge
-
+```
 ### Running Game Manager
+```bash
 ros2 run checkers_bot game_manager
+```
 
 ### Bring up gripper
+```bash
 ros2 launch ur5e_manoeuvring gripper_attached.launch.py
-
+```
 ### Command to pick up checker at row 0, column 1
 ```bash
 ros2 topic pub --once /checkers/manipulation_goal std_msgs/msg/String \
   "{data: '{\"command_id\":\"test-1\",\"command_type\":\"PICK\",\"square\":1,\"row\":0,\"col\":1,\"is_king_stack\":false,\"metadata\":{}}'}"
+```
+
+### Command to place checker at row 1, column 5
+```bash
+`ros2 topic pub --once /checkers/manipulation_goal std_msgs/msg/String   "{data: '{\"command_id\":\"test-2\",\"command_type\":\"PLACE\",\"square\":5,\"row\":1,\"col\":5,\"is_king_stack\":false,\"metadata\":{}}'}"`
 ```
 
 ## Robotic Control — Hardware

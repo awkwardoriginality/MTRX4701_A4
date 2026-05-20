@@ -42,6 +42,7 @@ class BoardCoordinates:
     DEFAULT_KING_HEIGHT = 0.040     # 40 mm (stacked) king height
 
     # Heights for manipulation
+    SAFE_TRANSIT_HEIGHT = 0.250     # 250 mm — transit altitude; keeps joint-space arcs above the floor
     HOVER_HEIGHT = 0.080            # 80 mm above board surface
     APPROACH_HEIGHT = 0.020         # 20 mm above board for slow approach
     BOB_HEIGHT = 0.025              # 25 mm above board during bobbing
@@ -112,6 +113,16 @@ class BoardCoordinates:
         """Convert an internal 46-board square to Cartesian coordinates."""
         row, col = INTERNAL_TO_ROWCOL[sq]
         return self.square_to_cartesian(row, col, height_offset)
+
+    def safe_transit_position(self, row: int, col: int) -> np.ndarray:
+        """Get the safe transit altitude above a square.
+
+        Used as the first and last waypoint in every pick/place sequence so that
+        all large inter-square transit moves stay at a high altitude.  At this
+        height, even joint-space interpolation (used when GetCartesianPath fails)
+        cannot swing the arm below the table surface.
+        """
+        return self.square_to_cartesian(row, col, self.SAFE_TRANSIT_HEIGHT)
 
     def hover_position(self, row: int, col: int) -> np.ndarray:
         """Get the hover position above a square (for transit)."""

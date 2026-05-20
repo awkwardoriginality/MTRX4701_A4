@@ -69,17 +69,27 @@ class PickPlace:
     ) -> List[MotionCommand]:
         """Generate commands to pick a piece from a board square.
 
-        Sequence: Transit to hover → descend to approach → descend to grasp
-        → activate grasp → ascend to hover.
+        Sequence: Safe transit altitude → hover → approach → grasp
+        → activate grasp → ascend to safe transit altitude.
+
+        The safe transit altitude is high enough that even joint-space
+        interpolation (used when MoveIt cannot plan a straight Cartesian path)
+        cannot swing the arm below the table surface.
         """
-        hover = self.coords.hover_position(row, col)
+        safe    = self.coords.safe_transit_position(row, col)
+        hover   = self.coords.hover_position(row, col)
         approach = self.coords.approach_position(row, col)
-        grasp = self.coords.grasp_position(row, col, is_king)
+        grasp   = self.coords.grasp_position(row, col, is_king)
 
         return [
             MotionCommand(
-                MotionType.MOVE_TO, hover, self.DEFAULT_ORIENTATION,
+                MotionType.MOVE_TO, safe, self.DEFAULT_ORIENTATION,
                 speed=self.TRANSIT_SPEED,
+                label=f"Safe transit above ({row},{col})",
+            ),
+            MotionCommand(
+                MotionType.MOVE_TO, hover, self.DEFAULT_ORIENTATION,
+                speed=self.APPROACH_SPEED,
                 label=f"Hover over ({row},{col})",
             ),
             MotionCommand(
@@ -101,9 +111,9 @@ class PickPlace:
                 label="Wait for grasp to settle",
             ),
             MotionCommand(
-                MotionType.MOVE_TO, hover, self.DEFAULT_ORIENTATION,
+                MotionType.MOVE_TO, safe, self.DEFAULT_ORIENTATION,
                 speed=self.APPROACH_SPEED,
-                label=f"Lift from ({row},{col})",
+                label=f"Lift to safe altitude from ({row},{col})",
             ),
         ]
 
@@ -112,10 +122,11 @@ class PickPlace:
     ) -> List[MotionCommand]:
         """Generate commands to place a piece at a board square.
 
-        Sequence: Transit to hover → descend to approach → descend to place
-        → release → ascend to hover.
+        Sequence: Safe transit altitude → hover → approach → place
+        → release → ascend to safe transit altitude.
         """
-        hover = self.coords.hover_position(row, col)
+        safe    = self.coords.safe_transit_position(row, col)
+        hover   = self.coords.hover_position(row, col)
         approach = self.coords.approach_position(row, col)
 
         if is_king_stack:
@@ -125,8 +136,13 @@ class PickPlace:
 
         return [
             MotionCommand(
-                MotionType.MOVE_TO, hover, self.DEFAULT_ORIENTATION,
+                MotionType.MOVE_TO, safe, self.DEFAULT_ORIENTATION,
                 speed=self.TRANSIT_SPEED,
+                label=f"Safe transit above ({row},{col}) for placement",
+            ),
+            MotionCommand(
+                MotionType.MOVE_TO, hover, self.DEFAULT_ORIENTATION,
+                speed=self.APPROACH_SPEED,
                 label=f"Hover over ({row},{col}) for placement",
             ),
             MotionCommand(
@@ -148,9 +164,9 @@ class PickPlace:
                 label="Wait for release",
             ),
             MotionCommand(
-                MotionType.MOVE_TO, hover, self.DEFAULT_ORIENTATION,
+                MotionType.MOVE_TO, safe, self.DEFAULT_ORIENTATION,
                 speed=self.APPROACH_SPEED,
-                label=f"Retreat from ({row},{col})",
+                label=f"Retreat to safe altitude from ({row},{col})",
             ),
         ]
 
@@ -158,16 +174,16 @@ class PickPlace:
         """Generate commands to bob down and up over a square.
 
         Used during multi-jump captures to show the piece's path.
-        Sequence: Transit to hover → descend to bob height → ascend to hover.
+        Sequence: Safe transit altitude → bob height → safe transit altitude.
         """
-        hover = self.coords.hover_position(row, col)
-        bob = self.coords.bob_position(row, col)
+        safe = self.coords.safe_transit_position(row, col)
+        bob  = self.coords.bob_position(row, col)
 
         return [
             MotionCommand(
-                MotionType.MOVE_TO, hover, self.DEFAULT_ORIENTATION,
+                MotionType.MOVE_TO, safe, self.DEFAULT_ORIENTATION,
                 speed=self.TRANSIT_SPEED,
-                label=f"Transit to ({row},{col}) for bob",
+                label=f"Safe transit to ({row},{col}) for bob",
             ),
             MotionCommand(
                 MotionType.MOVE_TO, bob, self.DEFAULT_ORIENTATION,
@@ -175,7 +191,7 @@ class PickPlace:
                 label=f"Bob down over ({row},{col})",
             ),
             MotionCommand(
-                MotionType.MOVE_TO, hover, self.DEFAULT_ORIENTATION,
+                MotionType.MOVE_TO, safe, self.DEFAULT_ORIENTATION,
                 speed=self.BOB_SPEED,
                 label=f"Bob up from ({row},{col})",
             ),
@@ -193,14 +209,14 @@ class PickPlace:
 
         # Move to discard position
         discard_pos = self.coords.discard_position(discard_index)
-        discard_hover = discard_pos.copy()
-        discard_hover[2] += self.coords.HOVER_HEIGHT
+        discard_safe = discard_pos.copy()
+        discard_safe[2] += self.coords.SAFE_TRANSIT_HEIGHT
 
         commands.extend([
             MotionCommand(
-                MotionType.MOVE_TO, discard_hover, self.DEFAULT_ORIENTATION,
+                MotionType.MOVE_TO, discard_safe, self.DEFAULT_ORIENTATION,
                 speed=self.TRANSIT_SPEED,
-                label=f"Transit to discard pile [{discard_index}]",
+                label=f"Safe transit to discard pile [{discard_index}]",
             ),
             MotionCommand(
                 MotionType.MOVE_TO, discard_pos, self.DEFAULT_ORIENTATION,
@@ -216,7 +232,7 @@ class PickPlace:
                 label="Wait for release",
             ),
             MotionCommand(
-                MotionType.MOVE_TO, discard_hover, self.DEFAULT_ORIENTATION,
+                MotionType.MOVE_TO, discard_safe, self.DEFAULT_ORIENTATION,
                 speed=self.APPROACH_SPEED,
                 label="Retreat from discard pile",
             ),
@@ -237,14 +253,14 @@ class PickPlace:
         """
         # Pick from reserve
         reserve_pos = self.coords.reserve_position(colour, reserve_index)
-        reserve_hover = reserve_pos.copy()
-        reserve_hover[2] += self.coords.HOVER_HEIGHT
+        reserve_safe = reserve_pos.copy()
+        reserve_safe[2] += self.coords.SAFE_TRANSIT_HEIGHT
 
         commands = [
             MotionCommand(
-                MotionType.MOVE_TO, reserve_hover, self.DEFAULT_ORIENTATION,
+                MotionType.MOVE_TO, reserve_safe, self.DEFAULT_ORIENTATION,
                 speed=self.TRANSIT_SPEED,
-                label=f"Transit to reserve pile",
+                label="Safe transit to reserve pile",
             ),
             MotionCommand(
                 MotionType.MOVE_TO, reserve_pos, self.DEFAULT_ORIENTATION,
@@ -260,9 +276,9 @@ class PickPlace:
                 label="Wait for grasp",
             ),
             MotionCommand(
-                MotionType.MOVE_TO, reserve_hover, self.DEFAULT_ORIENTATION,
+                MotionType.MOVE_TO, reserve_safe, self.DEFAULT_ORIENTATION,
                 speed=self.APPROACH_SPEED,
-                label="Lift reserve piece",
+                label="Lift reserve piece to safe altitude",
             ),
         ]
 
