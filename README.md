@@ -130,6 +130,8 @@ ros2 launch ur5e_manoeuvring gripper_attached.launch.py \
 use_fake_hardware:=false \
 tty_port:=/dev/ttyUSB0
 
+ros2 launch robotiq_hande_driver gripper_controller_preview.launch.py use_fake_hardware:=false tty_port:=/dev/ttyUSB0
+
 ros2 run ur5e_manoeuvring bounding_box_node
 
 ----------------------------------------------------------------------
@@ -164,6 +166,14 @@ control_msgs/action/ParallelGripperCommand \
   position: [0.0]
 "
 
+## In hardware
+ros2 action send_goal \
+/gripper_action_controller/gripper_cmd \
+control_msgs/action/ParallelGripperCommand \
+"command:
+  position: [0.0]
+"
+## In sim
 ros2 action send_goal \
 /gripper/gripper_action_controller/gripper_cmd \
 control_msgs/action/ParallelGripperCommand \
