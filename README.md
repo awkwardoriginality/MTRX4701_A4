@@ -180,11 +180,11 @@ In RViz, add a second RobotModel with Description Topic: `/gripper/robot_descrip
 
 ```bash
 ros2 run ur5e_manoeuvring chessboard_marker_node --ros-args \
-  -p origin_x:=0.30 \
-  -p origin_y:=-0.20 \
+  -p origin_x:=-0.60 \
+  -p origin_y:=0.25 \
   -p origin_z:=0.00 \
   -p square_size:=0.05 \
-  -p rotation_steps:=1
+  -p rotation_steps:=3
 ```
 
 | Parameter | Description |

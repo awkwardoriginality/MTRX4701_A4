@@ -4,10 +4,10 @@ robot:
   # To be calibrated via hand-eye calibration (Tsai-Lenz AX=XB)
   # Default: identity (placeholder)
   board_to_robot_tf:
-    - [ 0.0, -1.0, 0.0,  0.70]   # rotation_steps=1 (90 deg): x = origin_x + 8*sq - y_board
-    - [ 1.0,  0.0, 0.0, -0.20]   # y = origin_y + x_board
-    - [ 0.0,  0.0, 1.0,  0.00]
-    - [ 0.0,  0.0, 0.0,  1.00]
+    - [ 1.0,  0.0, 0.0,  -0.60]   # rotation_steps=1 (90 deg): x = origin_x + 8*sq - y_board
+    - [ 0.0,  1.0, 0.0,   0.20]   # y = origin_y + x_board
+    - [ 0.0,  0.0, 1.0,   0.00]
+    - [ 0.0,  0.0, 0.0,   1.00]
 
   # End-effector type: "vacuum" or "gripper"
   end_effector: "gripper"
