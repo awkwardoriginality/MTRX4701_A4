@@ -33,12 +33,12 @@ from std_msgs.msg import Header
 # Environment dimensions (metres)
 # Adjust these if your setup changes
 # ──────────────────────────────────────────────
-FRONT_DIST  = 1.00   # +X  (end effector faces this direction)
-BACK_DIST   = 0.40   # -X  (behind robot)
+FRONT_DIST  = 0.40   # +X  (end effector faces this direction)
+BACK_DIST   = 1.00   # -X  (behind robot)
 RIGHT_DIST  = 1.00   # +Y  (right of end effector)
-LEFT_DIST   = 0.50   # -Y  (left of end effector)
+LEFT_DIST   = 0.25   # -Y  (left of end effector)
 CEILING_HT  = 1.20   # +Z  (above base_link)
-WALL_THICKNESS = 0.05  # thickness of each collision slab (5 cm)
+WALL_THICKNESS = 0.02  # thickness of each collision slab (5 cm)
 
 # Total span used to size each wall's face
 X_SPAN = FRONT_DIST + BACK_DIST    # 1.40 m
