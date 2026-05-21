@@ -28,7 +28,7 @@ from geometry_msgs.msg import Pose, PoseStamped
 from moveit_msgs.srv import GetCartesianPath
 from moveit_msgs.action import MoveGroup as MoveGroupAction
 from moveit_msgs.msg import (
-    CollisionObject, PlanningScene, RobotState,
+    RobotState,
     MotionPlanRequest, Constraints,
     PositionConstraint, OrientationConstraint,
     BoundingVolume, WorkspaceParameters,
@@ -90,34 +90,8 @@ class UR5eCartesianNode(Node):
             "/gripper/gripper_action_controller/gripper_cmd",
         )
 
-        self._scene_pub = self.create_publisher(PlanningScene, "/planning_scene", 10)
-        self._floor_timer = self.create_timer(2.0, self._add_floor_once)
-
         self.get_logger().info("UR5e Cartesian node ready.")
         self.get_logger().info("Publish JSON goals to /ur5e_cartesian_goal")
-
-    # ── Scene setup ──────────────────────────────────────────────────────────
-
-    def _add_floor_once(self):
-        self._floor_timer.cancel()
-        box = SolidPrimitive(type=SolidPrimitive.BOX, dimensions=[3.0, 3.0, 0.01])
-        box_pose = Pose()
-        box_pose.position.z = -0.005   # top face at z = 0
-        box_pose.orientation.w = 1.0
-
-        floor = CollisionObject()
-        floor.header.frame_id = "base_link"
-        floor.header.stamp = self.get_clock().now().to_msg()
-        floor.id = "floor"
-        floor.operation = CollisionObject.ADD
-        floor.primitives = [box]
-        floor.primitive_poses = [box_pose]
-
-        scene = PlanningScene()
-        scene.is_diff = True
-        scene.world.collision_objects = [floor]
-        self._scene_pub.publish(scene)
-        self.get_logger().info("Floor collision object published to planning scene.")
 
     # ── Inbound goal ─────────────────────────────────────────────────────────
 
