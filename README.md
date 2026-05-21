@@ -95,11 +95,11 @@ Description Topic: /gripper/robot_description
 
 #### To add a checker board
 ros2 run ur5e_manoeuvring chessboard_marker_node --ros-args \
--p origin_x:=0.30 \
--p origin_y:=-0.20 \
+-p origin_x:=0.60 \
+-p origin_y:=-0.25 \
 -p origin_z:=0.00 \
 -p square_size:=0.05 \
--p rotation_steps:=1
+-p rotation_steps:=3
 
 origin_x         # board bottom-left x position relative to base_link (metres)
 origin_y         # board bottom-left y position relative to base_link (metres)
@@ -113,7 +113,15 @@ ros2 run ur5e_manoeuvring bounding_box_node
 #### To run cartesian goal sending node
 sudo apt install ros-jazzy-tf-transformations
 
-ros2 run ur5e_manoeuvring ur5e_cartesian_node
+ros2 run ur5e_manoeuvring checkerboard_pose_node --ros-args \
+  -p origin_x:=-0.60 \
+  -p origin_y:=0.25 \
+  -p origin_z:=0.00 \
+  -p square_size:=0.05 \
+  -p rotation_steps:=3 \
+  -p hover_height:=0.05
+
+
 ----------------------------------------------------------------------
 
 ### Robotic Control in HARDWARE
@@ -133,6 +141,18 @@ tty_port:=/dev/ttyUSB0
 ros2 launch robotiq_hande_driver gripper_controller_preview.launch.py use_fake_hardware:=false tty_port:=/dev/ttyUSB0
 
 ros2 run ur5e_manoeuvring bounding_box_node
+
+ros2 run ur5e_manoeuvring gripper_command_node --ros-args \
+  -p arm_model:=ur5e
+
+ros2 run ur5e_manoeuvring gripper_command_node --ros-args \
+  -p arm_model:=ur5
+
+ros2 topic pub --once /gripper_command std_msgs/msg/String \
+"{data: 'open'}"
+
+ros2 topic pub --once /gripper_command std_msgs/msg/String \
+"{data: 'close'}"
 
 ----------------------------------------------------------------------
 

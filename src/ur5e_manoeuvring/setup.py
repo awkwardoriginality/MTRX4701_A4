@@ -28,6 +28,8 @@ setup(
             'chessboard_marker_node = ur5e_manoeuvring.chessboard_marker_node:main',
             'bounding_box_node = ur5e_manoeuvring.bounding_box_node:main',
             'ur5e_cartesian_node = ur5e_manoeuvring.ur5e_cartesian_node:main',
+            'checkerboard_pose_node = ur5e_manoeuvring.checkerboard_pose_node:main',
+            'gripper_command_node = ur5e_manoeuvring.gripper_command_node:main',
         ],
     },
 )
