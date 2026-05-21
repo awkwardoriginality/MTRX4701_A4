@@ -119,7 +119,8 @@ ros2 run ur5e_manoeuvring checkerboard_pose_node --ros-args \
   -p origin_z:=0.00 \
   -p square_size:=0.05 \
   -p rotation_steps:=3 \
-  -p hover_height:=0.05
+  -p hover_height:=0.10 \
+  -p descent_height:=0.05
 
 
 ----------------------------------------------------------------------

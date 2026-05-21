@@ -32,7 +32,11 @@ class CheckerboardPoseNode(Node):
         self.declare_parameter("square_size", 0.05)
         self.declare_parameter("rotation_steps", 3)
 
+        # Hover height above board
         self.declare_parameter("hover_height", 0.10)
+
+        # How much to move down after reaching hover
+        self.declare_parameter("descent_height", 0.05)
 
         self.declare_parameter("planning_group", "ur_manipulator")
         self.declare_parameter("eef_link", "tool0")
@@ -44,6 +48,9 @@ class CheckerboardPoseNode(Node):
         self.retry_count = 0
         self.max_retries = 5
         self.last_target = None
+        self.hover_target = None
+        self.descent_target = None
+        self.current_stage = None
 
         self.sub = self.create_subscription(
             String,
@@ -53,7 +60,7 @@ class CheckerboardPoseNode(Node):
         )
 
         self.get_logger().info(
-            "Checkerboard pose node ready. Publish 'row col' or 'home' to /checkerboard_target"
+            "Ready. Publish 'row col' or 'home' to /checkerboard_target"
         )
 
     def rotate_square(self, row, col, rotation):
@@ -94,7 +101,7 @@ class CheckerboardPoseNode(Node):
         except Exception:
             parts = text.replace(",", " ").split()
             if len(parts) != 2:
-                raise ValueError("Use either 'row col', JSON {'row': r, 'col': c}, or 'home'")
+                raise ValueError("Use 'row col', JSON {'row': r, 'col': c}, or 'home'")
             return int(parts[0]), int(parts[1])
 
     def target_callback(self, msg):
@@ -102,8 +109,7 @@ class CheckerboardPoseNode(Node):
 
         if text in ["home", "upright", "back", "return"]:
             self.get_logger().info("Returning to upright/home pose")
-            self.last_target = None
-            self.retry_count = 0
+            self.reset_motion_state()
             self.send_home_goal()
             return
 
@@ -123,22 +129,47 @@ class CheckerboardPoseNode(Node):
         square_size = float(self.get_parameter("square_size").value)
         rotation = int(self.get_parameter("rotation_steps").value)
         hover_height = float(self.get_parameter("hover_height").value)
+        descent_height = float(self.get_parameter("descent_height").value)
 
         r_rot, c_rot = self.rotate_square(row, col, rotation)
 
         target_x = ox + c_rot * square_size + square_size / 2.0
         target_y = oy + r_rot * square_size + square_size / 2.0
-        target_z = oz + hover_height
 
-        self.last_target = (target_x, target_y, target_z)
+        hover_z = oz + hover_height
+        descend_z = oz + hover_height - descent_height
+
+        if descend_z < oz:
+            self.get_logger().error(
+                "descent_height is too large. Descend target would go below board origin_z."
+            )
+            return
+
+        self.hover_target = (target_x, target_y, hover_z)
+        self.descent_target = (target_x, target_y, descend_z)
+
+        self.last_target = self.hover_target
         self.retry_count = 0
+        self.current_stage = "hover"
 
         self.get_logger().info(
-            f"Target square row={row}, col={col} -> "
-            f"x={target_x:.3f}, y={target_y:.3f}, z={target_z:.3f}"
+            f"Square row={row}, col={col}"
+        )
+        self.get_logger().info(
+            f"Step 1 hover:   x={target_x:.3f}, y={target_y:.3f}, z={hover_z:.3f}"
+        )
+        self.get_logger().info(
+            f"Step 2 descend: x={target_x:.3f}, y={target_y:.3f}, z={descend_z:.3f}"
         )
 
-        self.send_moveit_pose_goal(target_x, target_y, target_z)
+        self.send_moveit_pose_goal(target_x, target_y, hover_z)
+
+    def reset_motion_state(self):
+        self.retry_count = 0
+        self.last_target = None
+        self.hover_target = None
+        self.descent_target = None
+        self.current_stage = None
 
     def send_moveit_pose_goal(self, x, y, z):
         if not self.move_client.wait_for_server(timeout_sec=5.0):
@@ -148,6 +179,7 @@ class CheckerboardPoseNode(Node):
         frame_id = self.get_parameter("frame_id").value
         eef_link = self.get_parameter("eef_link").value
 
+        # Tool pointing vertically down
         qx, qy, qz, qw = self.rpy_to_quat(0.0, math.pi, 0.0)
 
         pose = PoseStamped()
@@ -187,7 +219,7 @@ class CheckerboardPoseNode(Node):
         oc.weight = 1.0
 
         constraints = Constraints()
-        constraints.name = "checkerboard_hover_goal"
+        constraints.name = "checkerboard_pose_goal"
         constraints.position_constraints = [pc]
         constraints.orientation_constraints = [oc]
 
@@ -217,6 +249,7 @@ class CheckerboardPoseNode(Node):
             jc.weight = 1.0
             constraints.joint_constraints.append(jc)
 
+        self.current_stage = "home"
         self.send_moveit_request(constraints)
 
     def send_moveit_request(self, constraints):
@@ -265,8 +298,21 @@ class CheckerboardPoseNode(Node):
         error_code = result.error_code.val
 
         if error_code == 1:
-            self.get_logger().info("Move completed successfully")
+            self.get_logger().info(f"Move completed successfully: {self.current_stage}")
             self.retry_count = 0
+
+            if self.current_stage == "hover" and self.descent_target is not None:
+                x, y, z = self.descent_target
+                self.last_target = self.descent_target
+                self.current_stage = "descent"
+
+                self.get_logger().info(
+                    f"Now descending vertically to: x={x:.3f}, y={y:.3f}, z={z:.3f}"
+                )
+
+                self.send_moveit_pose_goal(x, y, z)
+                return
+
             return
 
         self.get_logger().error(f"MoveIt failed, error code: {error_code}")
@@ -275,7 +321,8 @@ class CheckerboardPoseNode(Node):
             self.retry_count += 1
 
             self.get_logger().warn(
-                f"Retrying same target ({self.retry_count}/{self.max_retries})"
+                f"Retrying {self.current_stage} target "
+                f"({self.retry_count}/{self.max_retries})"
             )
 
             x, y, z = self.last_target
