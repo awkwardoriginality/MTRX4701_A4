@@ -42,7 +42,7 @@ class CheckerboardPoseNode(Node):
         self.move_client = ActionClient(self, MoveGroup, "/move_action")
 
         self.retry_count = 0
-        self.max_retries = 5
+        self.max_retries = 3
         self.last_target = None
 
         self.sub = self.create_subscription(
@@ -227,7 +227,7 @@ class CheckerboardPoseNode(Node):
         request = MotionPlanRequest()
         request.group_name = self.get_parameter("planning_group").value
         request.num_planning_attempts = 20
-        request.allowed_planning_time = 10.0
+        request.allowed_planning_time = 8.0
         request.max_velocity_scaling_factor = float(
             self.get_parameter("velocity_scaling").value
         )
