@@ -42,7 +42,7 @@ class CheckerboardPoseNode(Node):
         self.move_client = ActionClient(self, MoveGroup, "/move_action")
 
         self.retry_count = 0
-        self.max_retries = 3
+        self.max_retries = 5
         self.last_target = None
 
         self.sub = self.create_subscription(
