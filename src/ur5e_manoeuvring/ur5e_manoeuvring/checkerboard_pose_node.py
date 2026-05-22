@@ -38,14 +38,56 @@ class CheckerboardPoseNode(Node):
 
         self.declare_parameter("planning_group", "ur_manipulator")
         self.declare_parameter("eef_link", "tool0")
-        self.declare_parameter("velocity_scaling", 0.25)
-        self.declare_parameter("acceleration_scaling", 0.25)
+        self.declare_parameter("velocity_scaling", 0.15)
+        self.declare_parameter("acceleration_scaling", 0.15)
+
+        self.joint_names = [
+            "shoulder_pan_joint",
+            "shoulder_lift_joint",
+            "elbow_joint",
+            "wrist_1_joint",
+            "wrist_2_joint",
+            "wrist_3_joint",
+        ]
+
+        self.home_joint_deg = [
+            -180.00,
+            -90.00,
+            -146.00,
+            -213.00,
+            -90.00,
+            90.00,
+        ]
+
+        self.home_waypoint_joint_deg = [
+            -90.00,
+            -90.00,
+            -146.00,
+            -213.00,
+            -90.00,
+            90.00,
+        ]
+
+        self.board_waypoint_joint_deg = [
+            -90.0,
+            -119.0,
+            -105.0,
+            -225.0,
+            -90.0,
+            90.0,
+        ]
 
         self.move_client = ActionClient(self, MoveGroup, "/move_action")
 
         self.retry_count = 0
         self.max_retries = 5
-        self.last_target = None
+
+        self.last_goal_type = None
+        self.last_pose_target = None
+        self.last_joint_target = None
+
+        self.pending_board_target = None
+
         self.hover_target = None
         self.descent_target = None
         self.current_stage = None
@@ -58,13 +100,19 @@ class CheckerboardPoseNode(Node):
             10,
         )
 
+        self.startup_timer = self.create_timer(1.0, self.startup_home_once)
+
         self.get_logger().info(
-            "Ready. Publish 'row col', 'lift', or 'home' to /checkerboard_target"
+            "Ready. Publish 'row col', JSON {'row':r,'col':c}, 'lift', or 'home'"
         )
+
+    def startup_home_once(self):
+        self.startup_timer.cancel()
+        self.get_logger().info("Startup: moving directly to HOME")
+        self.send_joint_goal(self.home_joint_deg, "startup_home")
 
     def rotate_square(self, row, col, rotation):
         rotation = rotation % 4
-
         if rotation == 0:
             return row, col
         if rotation == 1:
@@ -73,7 +121,6 @@ class CheckerboardPoseNode(Node):
             return 7 - row, 7 - col
         if rotation == 3:
             return 7 - col, row
-
         return row, col
 
     def rpy_to_quat(self, roll, pitch, yaw):
@@ -107,9 +154,9 @@ class CheckerboardPoseNode(Node):
         text = msg.data.strip().lower()
 
         if text in ["home", "upright", "back", "return"]:
-            self.get_logger().info("Returning to upright/home pose")
+            self.get_logger().info("Home command: moving HOME WAYPOINT -> HOME")
             self.reset_motion_state()
-            self.send_home_goal()
+            self.send_joint_goal(self.home_waypoint_joint_deg, "waypoint_before_home")
             return
 
         if text in ["lift", "raise", "up"]:
@@ -126,6 +173,16 @@ class CheckerboardPoseNode(Node):
             self.get_logger().error("row and col must be from 0 to 7")
             return
 
+        self.pending_board_target = (row, col)
+        self.retry_count = 0
+
+        self.get_logger().info(
+            f"Board command row={row}, col={col}: moving BOARD WAYPOINT -> square"
+        )
+
+        self.send_joint_goal(self.board_waypoint_joint_deg, "waypoint_before_board")
+
+    def prepare_board_motion(self, row, col):
         ox = float(self.get_parameter("origin_x").value)
         oy = float(self.get_parameter("origin_y").value)
         oz = float(self.get_parameter("origin_z").value)
@@ -143,26 +200,20 @@ class CheckerboardPoseNode(Node):
         descend_z = oz + hover_height - descent_height
 
         if descend_z < oz:
-            self.get_logger().error(
-                "descent_height is too large. Descend target would go below board origin_z."
-            )
+            self.get_logger().error("descent_height is too large")
             return
 
         self.hover_target = (target_x, target_y, hover_z)
         self.descent_target = (target_x, target_y, descend_z)
 
-        self.last_target = self.hover_target
-        self.retry_count = 0
+        self.get_logger().info(
+            f"Hover target:   x={target_x:.3f}, y={target_y:.3f}, z={hover_z:.3f}"
+        )
+        self.get_logger().info(
+            f"Descend target: x={target_x:.3f}, y={target_y:.3f}, z={descend_z:.3f}"
+        )
+
         self.current_stage = "hover"
-
-        self.get_logger().info(f"Square row={row}, col={col}")
-        self.get_logger().info(
-            f"Step 1 hover:   x={target_x:.3f}, y={target_y:.3f}, z={hover_z:.3f}"
-        )
-        self.get_logger().info(
-            f"Step 2 descend: x={target_x:.3f}, y={target_y:.3f}, z={descend_z:.3f}"
-        )
-
         self.send_moveit_pose_goal(target_x, target_y, hover_z)
 
     def send_lift_goal(self):
@@ -180,23 +231,43 @@ class CheckerboardPoseNode(Node):
 
         self.retry_count = 0
         self.current_stage = "lift"
-        self.last_target = (x, y, lifted_z)
-
         self.send_moveit_pose_goal(x, y, lifted_z)
 
     def reset_motion_state(self):
         self.retry_count = 0
-        self.last_target = None
+        self.last_goal_type = None
+        self.last_pose_target = None
+        self.last_joint_target = None
+        self.pending_board_target = None
         self.hover_target = None
         self.descent_target = None
         self.current_stage = None
 
-    def send_moveit_pose_goal(self, x, y, z):
-        if not self.move_client.wait_for_server(timeout_sec=5.0):
-            self.get_logger().error("MoveIt /move_action server not available")
-            return
+    def send_joint_goal(self, joint_deg, stage_name):
+        constraints = Constraints()
+        constraints.name = stage_name
 
+        joint_rad = [math.radians(v) for v in joint_deg]
+
+        for name, pos in zip(self.joint_names, joint_rad):
+            jc = JointConstraint()
+            jc.joint_name = name
+            jc.position = pos
+            jc.tolerance_above = 0.01
+            jc.tolerance_below = 0.01
+            jc.weight = 1.0
+            constraints.joint_constraints.append(jc)
+
+        self.current_stage = stage_name
+        self.last_goal_type = "joint"
+        self.last_joint_target = joint_deg
+
+        self.send_moveit_request(constraints)
+
+    def send_moveit_pose_goal(self, x, y, z):
         self.current_xyz = (x, y, z)
+        self.last_goal_type = "pose"
+        self.last_pose_target = (x, y, z)
 
         frame_id = self.get_parameter("frame_id").value
         eef_link = self.get_parameter("eef_link").value
@@ -242,33 +313,6 @@ class CheckerboardPoseNode(Node):
         constraints.position_constraints = [pc]
         constraints.orientation_constraints = [oc]
 
-        self.send_moveit_request(constraints)
-
-    def send_home_goal(self):
-        joint_names = [
-            "shoulder_pan_joint",
-            "shoulder_lift_joint",
-            "elbow_joint",
-            "wrist_1_joint",
-            "wrist_2_joint",
-            "wrist_3_joint",
-        ]
-
-        joint_positions = [0.0, -1.57, 0.0, -1.57, 0.0, 0.0]
-
-        constraints = Constraints()
-        constraints.name = "home_upright_goal"
-
-        for name, pos in zip(joint_names, joint_positions):
-            jc = JointConstraint()
-            jc.joint_name = name
-            jc.position = pos
-            jc.tolerance_above = 0.01
-            jc.tolerance_below = 0.01
-            jc.weight = 1.0
-            constraints.joint_constraints.append(jc)
-
-        self.current_stage = "home"
         self.send_moveit_request(constraints)
 
     def send_moveit_request(self, constraints):
@@ -320,9 +364,20 @@ class CheckerboardPoseNode(Node):
             self.get_logger().info(f"Move completed successfully: {self.current_stage}")
             self.retry_count = 0
 
+            if self.current_stage == "waypoint_before_home":
+                self.get_logger().info("Home waypoint reached. Moving to HOME.")
+                self.send_joint_goal(self.home_joint_deg, "home")
+                return
+
+            if self.current_stage == "waypoint_before_board":
+                if self.pending_board_target is not None:
+                    row, col = self.pending_board_target
+                    self.pending_board_target = None
+                    self.prepare_board_motion(row, col)
+                return
+
             if self.current_stage == "hover" and self.descent_target is not None:
                 x, y, z = self.descent_target
-                self.last_target = self.descent_target
                 self.current_stage = "descent"
 
                 self.get_logger().info(
@@ -336,15 +391,20 @@ class CheckerboardPoseNode(Node):
 
         self.get_logger().error(f"MoveIt failed, error code: {error_code}")
 
-        if self.retry_count < self.max_retries and self.last_target is not None:
+        if self.retry_count < self.max_retries:
             self.retry_count += 1
             self.get_logger().warn(
-                f"Retrying {self.current_stage} target ({self.retry_count}/{self.max_retries})"
+                f"Retrying {self.current_stage} ({self.retry_count}/{self.max_retries})"
             )
 
-            x, y, z = self.last_target
-            self.send_moveit_pose_goal(x, y, z)
-            return
+            if self.last_goal_type == "joint" and self.last_joint_target is not None:
+                self.send_joint_goal(self.last_joint_target, self.current_stage)
+                return
+
+            if self.last_goal_type == "pose" and self.last_pose_target is not None:
+                x, y, z = self.last_pose_target
+                self.send_moveit_pose_goal(x, y, z)
+                return
 
         self.get_logger().error("Maximum retries reached")
         self.retry_count = 0

@@ -113,12 +113,26 @@ ros2 run ur5e_manoeuvring bounding_box_node
 #### To run cartesian goal sending node
 sudo apt install ros-jazzy-tf-transformations
 
+# For UR5 in Halliday lab
 ros2 run ur5e_manoeuvring checkerboard_pose_node --ros-args \
   -p origin_x:=-0.60 \
   -p origin_y:=0.25 \
   -p origin_z:=0.00 \
   -p square_size:=0.05 \
   -p rotation_steps:=3 \
+  -p hover_height:=0.10 \
+  -p descent_height:=0.05 \
+  -p velocity_scaling:=0.08 \
+  -p acceleration_scaling:=0.05 \
+  -p lift_height:=0.20
+
+# For UR5e in Kirby lab
+ros2 run ur5e_manoeuvring checkerboard_pose_node --ros-args \
+  -p origin_x:=-0.20 \
+  -p origin_y:=0.51 \
+  -p origin_z:=0.00 \
+  -p square_size:=0.05 \
+  -p rotation_steps:=2 \
   -p hover_height:=0.10 \
   -p descent_height:=0.05 \
   -p velocity_scaling:=0.08 \
@@ -139,10 +153,6 @@ robot_ip:=<UR5E_IP_ADDRESS>
 ros2 launch ur_moveit_config ur_moveit.launch.py \
 ur_type:=ur5e \
 launch_rviz:=true
-
-ros2 launch ur5e_manoeuvring gripper_attached.launch.py \
-use_fake_hardware:=false \
-tty_port:=/dev/ttyUSB0
 
 ros2 launch robotiq_hande_driver gripper_controller_preview.launch.py use_fake_hardware:=false tty_port:=/dev/ttyUSB0
 

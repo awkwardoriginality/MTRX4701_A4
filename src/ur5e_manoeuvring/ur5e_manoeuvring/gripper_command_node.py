@@ -20,7 +20,7 @@ class GripperCommandNode(Node):
 
         # UR5e gripper positions
         self.declare_parameter("open_position", 0.025)
-        self.declare_parameter("closed_position", 0.0)
+        self.declare_parameter("closed_position", 0.019)
 
         # UR5 IO pins
         self.declare_parameter("open_pin", 0)
@@ -142,16 +142,15 @@ class GripperCommandNode(Node):
 
         goal = ParallelGripperCommand.Goal()
 
-        goal.command.position = position
-        goal.command.max_effort = 50.0
+        goal.command.name = ["finger_joint"]
+        goal.command.position = [float(position)]
+        goal.command.effort = [50.0]
 
         self.get_logger().info(
             f"Sending UR5e gripper position: {position:.3f}"
         )
 
-        future = self.gripper_action_client.send_goal_async(
-            goal
-        )
+        future = self.gripper_action_client.send_goal_async(goal)
 
         future.add_done_callback(
             self.gripper_goal_response_callback
