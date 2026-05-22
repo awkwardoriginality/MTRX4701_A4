@@ -3,7 +3,7 @@ checkers_perception:
     # -------------------------
     # Input source
     # -------------------------
-    input_mode: "ros"        # "ros" or "bag"
+    input_mode: "bag"        # "ros" or "bag"
     bag_path: "/home/eashan-garg/checkers1.bag"  
     image_topic: "/camera/camera/color/image_raw"
 
