@@ -4,6 +4,10 @@ import rclpy
 from rclpy.node import Node
 
 from std_msgs.msg import Int32MultiArray, Bool, String
+from checkers_bot.game_engine.board import Board, CB_BLACK, CB_WHITE, INTERNAL_TO_STANDARD
+from checkers_bot.game_engine.rules import Rules
+from checkers_bot.game_engine.search import Search
+from checkers_bot.game_engine.move_generator import MoveGenerator
 
 
 class GameController(Node):
@@ -42,6 +46,27 @@ class GameController(Node):
             "/game/status",
             10
         )
+
+        self.move_legal_pub = self.create_publisher(
+            Bool,
+            "/game/move_legal",
+            10
+        )
+
+        self.robot_next_move_pub = self.create_publisher(
+            Int32MultiArray,
+            "/game/robot_next_move",
+            10
+        )
+
+        # Initialize core game logic elements
+        self.internal_board = Board()
+        self.rules = Rules()
+        self.search = Search(max_time=5.0)
+
+        self.human_colour = CB_BLACK
+        self.robot_colour = CB_WHITE
+        self.current_turn = self.human_colour
 
         self.current_board = None
 
@@ -110,6 +135,7 @@ class GameController(Node):
                 return
 
             self.board_before_human = self.current_board.copy()
+            self.internal_board = Board.from_flat64(self.current_board)
 
             self.publish_status("Ready to play. Make your move.")
 
@@ -136,16 +162,43 @@ class GameController(Node):
             ):
                 return
 
-            self.board_after_human = self.current_board.copy()
+            perceived_board = Board.from_flat64(self.current_board)
 
-            self.publish_status(
-                "Human move detected. Robot turn starting."
-            )
+            # Try to match the board change to a legal move
+            legal_moves = self.rules.get_legal_moves(self.internal_board, self.human_colour)
+            matched_move = None
+            
+            for move in legal_moves:
+                test_board = self.internal_board.copy()
+                test_board.apply_move_inplace(move)
+                if test_board == perceived_board:
+                    matched_move = move
+                    break
+            
+            legal_msg = Bool()
+            if matched_move is not None:
+                self.internal_board.apply_move_inplace(matched_move)
+                legal_msg.data = True
+                self.move_legal_pub.publish(legal_msg)
+                
+                self.board_after_human = self.current_board.copy()
 
-            self.robot_done = False
-            self.robot_retry_count = 0
+                self.publish_status(
+                    "Human move legal. Robot turn starting."
+                )
 
-            self.state = "ROBOT_MOVE_START"
+                self.current_turn = self.robot_colour
+                self.robot_done = False
+                self.robot_retry_count = 0
+
+                self.state = "ROBOT_MOVE_START"
+            else:
+                legal_msg.data = False
+                self.move_legal_pub.publish(legal_msg)
+                self.publish_status(
+                    "Human move ILLEGAL. Waiting for board correction."
+                )
+                
             return
 
         # --------------------------------------------------
@@ -158,11 +211,34 @@ class GameController(Node):
         # --------------------------------------------------
         if self.state == "ROBOT_MOVE_START":
 
+            self.publish_status("AI is computing robot move...")
+            
+            # Compute best move
+            stats = self.search.find_best_move(self.internal_board, self.robot_colour)
+            best_move = stats.best_move
+            
+            if best_move is None:
+                self.publish_status("ERROR: AI could not find a valid move. Human wins.")
+                self.state = "MANUAL_RESET_REQUIRED"
+                return
+                
+            # Apply AI move internally
+            self.internal_board.apply_move_inplace(best_move)
+            self.current_turn = self.human_colour
+
+            # Convert to standard coordinates to publish
+            from_std = INTERNAL_TO_STANDARD.get(best_move.from_sq, 0)
+            to_std = INTERNAL_TO_STANDARD.get(best_move.to_sq, 0)
+            
+            next_move_msg = Int32MultiArray()
+            next_move_msg.data = [from_std, to_std]
+            self.robot_next_move_pub.publish(next_move_msg)
+
             self.robot_done = False
 
             self.publish_robot_start()
 
-            self.publish_status("Robot moving.")
+            self.publish_status(f"Robot moving from {from_std} to {to_std}.")
 
             self.state = "WAIT_ROBOT_DONE"
             return

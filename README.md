@@ -40,8 +40,8 @@ realsense-viewer
 # To see the camera feed in ros2
 ros2 run rqt_image_view rqt_image_view
 
-# To run the game state machine
-ros2 run game_engine game_controller
+# To run the game state machine (includes CheckersGame legality checking & AI)
+ros2 run game_state_machine game_controller
 
 # To echo the game status
 ros2 topic echo /game/status
