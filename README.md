@@ -120,7 +120,12 @@ ros2 run ur5e_manoeuvring checkerboard_pose_node --ros-args \
   -p square_size:=0.05 \
   -p rotation_steps:=3 \
   -p hover_height:=0.10 \
-  -p descent_height:=0.05
+  -p descent_height:=0.05 \
+  -p velocity_scaling:=0.08 \
+  -p acceleration_scaling:=0.05 \
+  -p lift_height:=0.20
+
+  ros2 topic pub --once /checkerboard_target std_msgs/msg/String "{data: '2 3'}"
 
 
 ----------------------------------------------------------------------

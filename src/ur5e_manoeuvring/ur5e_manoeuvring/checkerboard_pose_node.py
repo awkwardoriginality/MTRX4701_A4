@@ -32,11 +32,9 @@ class CheckerboardPoseNode(Node):
         self.declare_parameter("square_size", 0.05)
         self.declare_parameter("rotation_steps", 3)
 
-        # Hover height above board
         self.declare_parameter("hover_height", 0.10)
-
-        # How much to move down after reaching hover
         self.declare_parameter("descent_height", 0.05)
+        self.declare_parameter("lift_height", 0.20)
 
         self.declare_parameter("planning_group", "ur_manipulator")
         self.declare_parameter("eef_link", "tool0")
@@ -51,6 +49,7 @@ class CheckerboardPoseNode(Node):
         self.hover_target = None
         self.descent_target = None
         self.current_stage = None
+        self.current_xyz = None
 
         self.sub = self.create_subscription(
             String,
@@ -60,7 +59,7 @@ class CheckerboardPoseNode(Node):
         )
 
         self.get_logger().info(
-            "Ready. Publish 'row col' or 'home' to /checkerboard_target"
+            "Ready. Publish 'row col', 'lift', or 'home' to /checkerboard_target"
         )
 
     def rotate_square(self, row, col, rotation):
@@ -101,7 +100,7 @@ class CheckerboardPoseNode(Node):
         except Exception:
             parts = text.replace(",", " ").split()
             if len(parts) != 2:
-                raise ValueError("Use 'row col', JSON {'row': r, 'col': c}, or 'home'")
+                raise ValueError("Use 'row col', JSON {'row': r, 'col': c}, 'lift', or 'home'")
             return int(parts[0]), int(parts[1])
 
     def target_callback(self, msg):
@@ -111,6 +110,10 @@ class CheckerboardPoseNode(Node):
             self.get_logger().info("Returning to upright/home pose")
             self.reset_motion_state()
             self.send_home_goal()
+            return
+
+        if text in ["lift", "raise", "up"]:
+            self.send_lift_goal()
             return
 
         try:
@@ -152,9 +155,7 @@ class CheckerboardPoseNode(Node):
         self.retry_count = 0
         self.current_stage = "hover"
 
-        self.get_logger().info(
-            f"Square row={row}, col={col}"
-        )
+        self.get_logger().info(f"Square row={row}, col={col}")
         self.get_logger().info(
             f"Step 1 hover:   x={target_x:.3f}, y={target_y:.3f}, z={hover_z:.3f}"
         )
@@ -163,6 +164,25 @@ class CheckerboardPoseNode(Node):
         )
 
         self.send_moveit_pose_goal(target_x, target_y, hover_z)
+
+    def send_lift_goal(self):
+        if self.current_xyz is None:
+            self.get_logger().error("No current pose stored yet. Move to a square first.")
+            return
+
+        x, y, z = self.current_xyz
+        lift_height = float(self.get_parameter("lift_height").value)
+        lifted_z = z + lift_height
+
+        self.get_logger().info(
+            f"Lifting vertically by {lift_height:.3f} m to z={lifted_z:.3f}"
+        )
+
+        self.retry_count = 0
+        self.current_stage = "lift"
+        self.last_target = (x, y, lifted_z)
+
+        self.send_moveit_pose_goal(x, y, lifted_z)
 
     def reset_motion_state(self):
         self.retry_count = 0
@@ -176,10 +196,11 @@ class CheckerboardPoseNode(Node):
             self.get_logger().error("MoveIt /move_action server not available")
             return
 
+        self.current_xyz = (x, y, z)
+
         frame_id = self.get_parameter("frame_id").value
         eef_link = self.get_parameter("eef_link").value
 
-        # Tool pointing vertically down
         qx, qy, qz, qw = self.rpy_to_quat(0.0, math.pi, 0.0)
 
         pose = PoseStamped()
@@ -211,8 +232,6 @@ class CheckerboardPoseNode(Node):
         oc.header.frame_id = frame_id
         oc.link_name = eef_link
         oc.orientation = pose.pose.orientation
-
-        # Keep strict vertical orientation
         oc.absolute_x_axis_tolerance = 0.05
         oc.absolute_y_axis_tolerance = 0.05
         oc.absolute_z_axis_tolerance = 3.14
@@ -319,10 +338,8 @@ class CheckerboardPoseNode(Node):
 
         if self.retry_count < self.max_retries and self.last_target is not None:
             self.retry_count += 1
-
             self.get_logger().warn(
-                f"Retrying {self.current_stage} target "
-                f"({self.retry_count}/{self.max_retries})"
+                f"Retrying {self.current_stage} target ({self.retry_count}/{self.max_retries})"
             )
 
             x, y, z = self.last_target
