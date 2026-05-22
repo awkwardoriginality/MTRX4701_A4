@@ -62,6 +62,7 @@ In `--ros-bridge` mode:
 - the ROS `game_manager` reacts as if perception had seen the board
 - the GUI mirrors robot moves back from `/checkers/internal_board`
 - local GUI AI is disabled so ROS remains the authority for robot turns
+- failed manipulation results force the game manager into an explicit error state instead of silently continuing
 
 Inspect the main coordination topics:
 
@@ -109,6 +110,8 @@ pytest src/checkers_bot/test/test_game_engine.py -v
 pytest src/checkers_bot/test/test_perception.py -v
 pytest src/checkers_bot/test/test_state_machine_integration.py -v
 pytest src/checkers_bot/test/test_ros_topic_contracts.py -v
+pytest src/checkers_bot/test/test_gui_ros_bridge.py -v
+pytest src/checkers_bot/test/test_state_machine_integration.py -k "no_camera or manipulation_failure" -v
 ```
 
 The ROS contract tests validate the JSON payloads and callback behaviour behind:
