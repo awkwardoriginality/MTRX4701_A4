@@ -35,10 +35,10 @@ class CheckersPerceptionNode(Node):
         # -------------------------
         # ArUco marker IDs
         # -------------------------
-        self.declare_parameter("top_left_id", 3)
-        self.declare_parameter("top_right_id", 1)
-        self.declare_parameter("bottom_right_id", 0)
-        self.declare_parameter("bottom_left_id", 2)
+        self.declare_parameter("top_left_id", 1)
+        self.declare_parameter("top_right_id", 3)
+        self.declare_parameter("bottom_right_id", 2)
+        self.declare_parameter("bottom_left_id", 0)
 
         self.declare_parameter("aruco_dictionary", "DICT_4X4_50")
         self.declare_parameter("max_missing_aruco_frames", 10)

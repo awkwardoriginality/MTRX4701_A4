@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import json
+import random
 import rclpy
 from rclpy.node import Node
 
@@ -9,6 +11,9 @@ from std_msgs.msg import Int32MultiArray, Bool, String
 class GameController(Node):
     def __init__(self):
         super().__init__("game_controller")
+
+        self.declare_parameter("empty_value", 0)
+        self.declare_parameter("purple_value", 2)
 
         self.board_sub = self.create_subscription(
             Int32MultiArray,
@@ -31,9 +36,9 @@ class GameController(Node):
             10
         )
 
-        self.robot_start_pub = self.create_publisher(
-            Bool,
-            "/game/robot_start",
+        self.robot_move_pub = self.create_publisher(
+            String,
+            "/robot_move",
             10
         )
 
@@ -55,6 +60,8 @@ class GameController(Node):
         self.robot_retry_count = 0
         self.max_robot_retries = 2
 
+        self.last_robot_move = None
+
         self.state = "WAIT_INITIAL_CLEAR"
 
         self.timer = self.create_timer(0.2, self.control_loop)
@@ -72,9 +79,16 @@ class GameController(Node):
         self.blocked = msg.data
 
     def robot_done_callback(self, msg):
+        if self.state != "WAIT_ROBOT_DONE":
+            return
+
         if msg.data:
             self.robot_done = True
             self.get_logger().info("Robot done signal received")
+        else:
+            self.robot_done = False
+            self.publish_status("ERROR: Robot controller reported failure.")
+            self.state = "ROBOT_MOVE_FAILED"
 
     def publish_status(self, text):
         msg = String()
@@ -82,28 +96,90 @@ class GameController(Node):
         self.status_pub.publish(msg)
         self.get_logger().info(text)
 
-    def publish_robot_start(self):
-        msg = Bool()
-        msg.data = True
-        self.robot_start_pub.publish(msg)
-        self.get_logger().info("Published robot start command")
-
     def boards_equal(self, a, b):
         return a == b
+
+    def index_to_row_col(self, index):
+        row = index // 8
+        col = index % 8
+        return row, col
+
+    def row_col_to_index(self, row, col):
+        return row * 8 + col
+
+    def in_bounds(self, row, col):
+        return 0 <= row < 8 and 0 <= col < 8
+
+    def find_random_purple_diagonal_move(self, board):
+        empty_value = int(self.get_parameter("empty_value").value)
+        purple_value = int(self.get_parameter("purple_value").value)
+
+        possible_moves = []
+
+        diagonal_steps = [
+            (-1, -1),
+            (-1, 1),
+            (1, -1),
+            (1, 1),
+        ]
+
+        for index, value in enumerate(board):
+            if value != purple_value:
+                continue
+
+            row, col = self.index_to_row_col(index)
+
+            for dr, dc in diagonal_steps:
+                new_row = row + dr
+                new_col = col + dc
+
+                if not self.in_bounds(new_row, new_col):
+                    continue
+
+                new_index = self.row_col_to_index(new_row, new_col)
+
+                if board[new_index] == empty_value:
+                    possible_moves.append(
+                        ((row, col), (new_row, new_col))
+                    )
+
+        if len(possible_moves) == 0:
+            return None
+
+        return random.choice(possible_moves)
+
+    def publish_robot_move(self):
+        move = self.find_random_purple_diagonal_move(
+            self.board_after_human
+        )
+
+        if move is None:
+            self.publish_status(
+                "ERROR: No valid purple diagonal move found."
+            )
+            self.state = "MANUAL_RESET_REQUIRED"
+            return
+
+        from_square, to_square = move
+
+        self.last_robot_move = move
+
+        msg = String()
+        msg.data = json.dumps({
+            "from": [from_square[0], from_square[1]],
+            "to": [to_square[0], to_square[1]],
+        })
+
+        self.robot_move_pub.publish(msg)
+
+        self.get_logger().info(
+            f"Published robot move: {msg.data}"
+        )
 
     def control_loop(self):
         if self.current_board is None:
             return
 
-        # --------------------------------------------------
-        # 1. WAIT_INITIAL_CLEAR
-        #
-        # Wait until:
-        # - board is visible
-        # - no arm/human blocking view
-        #
-        # Save the initial board state.
-        # --------------------------------------------------
         if self.state == "WAIT_INITIAL_CLEAR":
 
             if self.blocked:
@@ -116,15 +192,6 @@ class GameController(Node):
             self.state = "WAIT_HUMAN_MOVE"
             return
 
-        # --------------------------------------------------
-        # 2. WAIT_HUMAN_MOVE
-        #
-        # Wait for:
-        # - board not blocked
-        # - current board != previous board
-        #
-        # This means the human made a move.
-        # --------------------------------------------------
         if self.state == "WAIT_HUMAN_MOVE":
 
             if self.blocked:
@@ -148,34 +215,22 @@ class GameController(Node):
             self.state = "ROBOT_MOVE_START"
             return
 
-        # --------------------------------------------------
-        # 3. ROBOT_MOVE_START
-        #
-        # Tell the robot node to begin moving.
-        #
-        # Publishes:
-        # /game/robot_start = True
-        # --------------------------------------------------
         if self.state == "ROBOT_MOVE_START":
 
             self.robot_done = False
 
-            self.publish_robot_start()
+            previous_state = self.state
+
+            self.publish_robot_move()
+
+            if self.state != previous_state:
+                return
 
             self.publish_status("Robot moving.")
 
             self.state = "WAIT_ROBOT_DONE"
             return
 
-        # --------------------------------------------------
-        # 4. WAIT_ROBOT_DONE
-        #
-        # Wait for robot node to publish:
-        #
-        # /game/robot_done = True
-        #
-        # This means robot says motion is complete.
-        # --------------------------------------------------
         if self.state == "WAIT_ROBOT_DONE":
 
             if not self.robot_done:
@@ -189,14 +244,6 @@ class GameController(Node):
             self.state = "WAIT_BOARD_CLEAR_AFTER_ROBOT"
             return
 
-        # --------------------------------------------------
-        # 5. WAIT_BOARD_CLEAR_AFTER_ROBOT
-        #
-        # Robot may still physically block the board.
-        #
-        # Wait until:
-        # blocked == False
-        # --------------------------------------------------
         if self.state == "WAIT_BOARD_CLEAR_AFTER_ROBOT":
 
             if self.blocked:
@@ -205,22 +252,6 @@ class GameController(Node):
             self.state = "VERIFY_ROBOT_BOARD_CHANGE"
             return
 
-        # --------------------------------------------------
-        # 6. VERIFY_ROBOT_BOARD_CHANGE
-        #
-        # Verify robot ACTUALLY changed the board.
-        #
-        # Compare:
-        # board_after_human
-        # vs
-        # current_board
-        #
-        # If same:
-        # robot failed
-        #
-        # If different:
-        # robot succeeded
-        # --------------------------------------------------
         if self.state == "VERIFY_ROBOT_BOARD_CHANGE":
 
             if self.blocked:
@@ -258,14 +289,6 @@ class GameController(Node):
             self.state = "WAIT_HUMAN_MOVE"
             return
 
-        # --------------------------------------------------
-        # 7. ROBOT_MOVE_FAILED
-        #
-        # Robot claimed move completed,
-        # but board did not change.
-        #
-        # Retry robot move.
-        # --------------------------------------------------
         if self.state == "ROBOT_MOVE_FAILED":
 
             if self.robot_retry_count < self.max_robot_retries:
@@ -292,13 +315,6 @@ class GameController(Node):
             self.state = "MANUAL_RESET_REQUIRED"
             return
 
-        # --------------------------------------------------
-        # 8. MANUAL_RESET_REQUIRED
-        #
-        # System halted.
-        #
-        # Requires manual intervention/reset.
-        # --------------------------------------------------
         if self.state == "MANUAL_RESET_REQUIRED":
             return
 

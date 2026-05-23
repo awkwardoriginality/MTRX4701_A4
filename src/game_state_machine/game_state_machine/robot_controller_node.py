@@ -23,6 +23,12 @@ class RobotControllerNode(Node):
             10,
         )
 
+        self.robot_done_pub = self.create_publisher(
+            Bool,
+            "/game/robot_done",
+            10,
+        )
+
         self.command_sub = self.create_subscription(
             String,
             "/robot_move",
@@ -98,6 +104,7 @@ class RobotControllerNode(Node):
             self.get_logger().info("Full robot sequence complete")
             self.busy = False
             self.waiting_for = None
+            self.publish_robot_done(True)
             return
 
         command_type, command = self.sequence[self.step_index]
@@ -129,6 +136,7 @@ class RobotControllerNode(Node):
             self.get_logger().error("Arm motion failed. Sequence stopped.")
             self.busy = False
             self.waiting_for = None
+            self.publish_robot_done(False)
             return
 
         self.get_logger().info("Arm motion done")
@@ -148,6 +156,7 @@ class RobotControllerNode(Node):
             self.get_logger().error("Gripper command failed. Sequence stopped.")
             self.busy = False
             self.waiting_for = None
+            self.publish_robot_done(False)
             return
 
         self.get_logger().info("Gripper command done")
@@ -155,6 +164,15 @@ class RobotControllerNode(Node):
         self.step_index += 1
         self.waiting_for = None
         self.run_next_step()
+
+    def publish_robot_done(self, success):
+        msg = Bool()
+        msg.data = bool(success)
+        self.robot_done_pub.publish(msg)
+
+        self.get_logger().info(
+            f"Published /game/robot_done = {success}"
+        )
 
 
 def main(args=None):

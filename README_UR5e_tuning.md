@@ -41,3 +41,11 @@ ros2 topic pub --once /robot_move std_msgs/msg/String "{data: '{\"from\":[0,7], 
 ros2 topic pub --once /gripper_done std_msgs/msg/Bool "{data: true}"
 
 # board should be 7.5cm laterally and 20cm longitudinally from the arm
+
+
+## State machine
+ros2 run game_state_machine game_controller
+ros2 run perception checkers_perception --ros-args --params-file src/perception/config/checkers_perception.yaml
+ros2 launch realsense2_camera rs_launch.py
+ros2 run rqt_image_view rqt_image_view
+
