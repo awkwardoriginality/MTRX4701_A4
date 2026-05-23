@@ -10,8 +10,6 @@ ros2 run ur5e_manoeuvring chessboard_marker_node --ros-args -p origin_x:=-0.075 
 
 ros2 run ur5e_manoeuvring checkerboard_pose_node --ros-args   -p origin_x:=-0.075   -p origin_y:=0.20   -p origin_z:=0.00   -p square_size:=0.05   -p rotation_steps:=2   -p hover_height:=0.20   -p descent_height:=0.10   -p velocity_scaling:=0.08   -p acceleration_scaling:=0.05   -p lift_height:=0.20
 
-ros2 topic pub --once /checkerboard_target std_msgs/msg/String "{data: '0 7'}"  #lift #home
-
 ## Hardware
 
 ros2 launch ur_robot_driver ur_control.launch.py \
@@ -35,5 +33,11 @@ ros2 topic pub --once /checkerboard_target std_msgs/msg/String "{data: '0 7'}"
 
 ros2 topic pub --once /gripper_command std_msgs/msg/String \
 "{data: 'open'}"
+
+or
+
+ros2 run game_state_machine robot_controller
+ros2 topic pub --once /robot_move std_msgs/msg/String "{data: '{\"from\":[0,7], \"to\":[7,0]}'}"
+ros2 topic pub --once /gripper_done std_msgs/msg/Bool "{data: true}"
 
 # board should be 7.5cm laterally and 20cm longitudinally from the arm

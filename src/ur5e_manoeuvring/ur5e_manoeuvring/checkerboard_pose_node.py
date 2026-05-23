@@ -6,7 +6,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 
-from std_msgs.msg import String
+from std_msgs.msg import String, Bool
 from geometry_msgs.msg import PoseStamped
 from moveit_msgs.action import MoveGroup
 from moveit_msgs.msg import (
@@ -79,6 +79,12 @@ class CheckerboardPoseNode(Node):
 
         self.move_client = ActionClient(self, MoveGroup, "/move_action")
 
+        self.motion_done_pub = self.create_publisher(
+            Bool,
+            "/arm_motion_done",
+            10,
+        )
+
         self.retry_count = 0
         self.max_retries = 5
 
@@ -104,6 +110,15 @@ class CheckerboardPoseNode(Node):
 
         self.get_logger().info(
             "Ready. Publish 'row col', JSON {'row':r,'col':c}, 'lift', or 'home'"
+        )
+
+    def publish_motion_done(self, success):
+        msg = Bool()
+        msg.data = bool(success)
+        self.motion_done_pub.publish(msg)
+
+        self.get_logger().info(
+            f"Published /arm_motion_done = {success}"
         )
 
     def startup_home_once(self):
@@ -387,6 +402,7 @@ class CheckerboardPoseNode(Node):
                 self.send_moveit_pose_goal(x, y, z)
                 return
 
+            self.publish_motion_done(True)
             return
 
         self.get_logger().error(f"MoveIt failed, error code: {error_code}")
@@ -408,6 +424,7 @@ class CheckerboardPoseNode(Node):
 
         self.get_logger().error("Maximum retries reached")
         self.retry_count = 0
+        self.publish_motion_done(False)
 
 
 def main(args=None):

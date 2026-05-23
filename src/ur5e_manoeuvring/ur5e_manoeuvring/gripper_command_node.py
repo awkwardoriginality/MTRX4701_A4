@@ -4,7 +4,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
 
-from std_msgs.msg import String
+from std_msgs.msg import String, Bool
 from control_msgs.action import ParallelGripperCommand
 from ur_msgs.srv import SetIO
 
@@ -13,27 +13,26 @@ class GripperCommandNode(Node):
     def __init__(self):
         super().__init__("gripper_command_node")
 
-        # arm_model:
-        #   ur5e -> Robotiq/parallel gripper action
-        #   ur5  -> UR digital IO pneumatic gripper
         self.declare_parameter("arm_model", "ur5e")
 
-        # UR5e gripper positions
         self.declare_parameter("open_position", 0.025)
         self.declare_parameter("closed_position", 0.019)
 
-        # UR5 IO pins
         self.declare_parameter("open_pin", 0)
         self.declare_parameter("close_pin", 1)
 
-        self.arm_model = (
-            self.get_parameter("arm_model").value.lower()
-        )
+        self.arm_model = self.get_parameter("arm_model").value.lower()
 
         self.sub = self.create_subscription(
             String,
             "/gripper_command",
             self.command_callback,
+            10,
+        )
+
+        self.done_pub = self.create_publisher(
+            Bool,
+            "/gripper_done",
             10,
         )
 
@@ -70,8 +69,24 @@ class GripperCommandNode(Node):
             "Publish 'open' or 'close' to /gripper_command"
         )
 
+        self.get_logger().info(
+            "Publishing gripper completion on /gripper_done"
+        )
+
+    def publish_done(self, success=True):
+        msg = Bool()
+        msg.data = bool(success)
+        self.done_pub.publish(msg)
+
+        if success:
+            self.get_logger().info("Published /gripper_done = True")
+        else:
+            self.get_logger().warn("Published /gripper_done = False")
+
     def command_callback(self, msg):
         command = msg.data.strip().lower()
+
+        self.publish_done(False)
 
         if command in ["open", "opened"]:
             self.open_gripper()
@@ -83,61 +98,42 @@ class GripperCommandNode(Node):
             self.get_logger().error(
                 "Command must be 'open' or 'close'"
             )
-
-    # ============================================================
-    # OPEN
-    # ============================================================
+            self.publish_done(False)
 
     def open_gripper(self):
         if self.arm_model == "ur5e":
-
             position = float(
                 self.get_parameter("open_position").value
             )
-
             self.send_gripper_action(position)
 
         elif self.arm_model == "ur5":
-
             pin = int(
                 self.get_parameter("open_pin").value
             )
-
             self.send_io(pin)
-
-    # ============================================================
-    # CLOSE
-    # ============================================================
 
     def close_gripper(self):
         if self.arm_model == "ur5e":
-
             position = float(
                 self.get_parameter("closed_position").value
             )
-
             self.send_gripper_action(position)
 
         elif self.arm_model == "ur5":
-
             pin = int(
                 self.get_parameter("close_pin").value
             )
-
             self.send_io(pin)
 
-    # ============================================================
-    # UR5e ACTION
-    # ============================================================
-
     def send_gripper_action(self, position):
-
         if not self.gripper_action_client.wait_for_server(
             timeout_sec=5.0
         ):
             self.get_logger().error(
                 "Gripper action server not available"
             )
+            self.publish_done(False)
             return
 
         goal = ParallelGripperCommand.Goal()
@@ -157,18 +153,14 @@ class GripperCommandNode(Node):
         )
 
     def gripper_goal_response_callback(self, future):
-
         goal_handle = future.result()
 
         if not goal_handle.accepted:
-            self.get_logger().error(
-                "Gripper goal rejected"
-            )
+            self.get_logger().error("Gripper goal rejected")
+            self.publish_done(False)
             return
 
-        self.get_logger().info(
-            "Gripper goal accepted"
-        )
+        self.get_logger().info("Gripper goal accepted")
 
         result_future = goal_handle.get_result_async()
 
@@ -177,23 +169,35 @@ class GripperCommandNode(Node):
         )
 
     def gripper_result_callback(self, future):
+        try:
+            result = future.result()
+            status = result.status
 
-        self.get_logger().info(
-            "Gripper command finished"
-        )
+            if status == 4:
+                self.get_logger().info(
+                    "Gripper command finished successfully"
+                )
+                self.publish_done(True)
+            else:
+                self.get_logger().error(
+                    f"Gripper command failed with status: {status}"
+                )
+                self.publish_done(False)
 
-    # ============================================================
-    # UR5 DIGITAL IO
-    # ============================================================
+        except Exception as e:
+            self.get_logger().error(
+                f"Gripper result error: {e}"
+            )
+            self.publish_done(False)
 
     def send_io(self, active_pin):
-
         if not self.io_client.wait_for_service(
             timeout_sec=5.0
         ):
             self.get_logger().error(
                 "SetIO service not available"
             )
+            self.publish_done(False)
             return
 
         open_pin = int(
@@ -204,20 +208,14 @@ class GripperCommandNode(Node):
             self.get_parameter("close_pin").value
         )
 
-        # Reset both pins first
         for pin in [open_pin, close_pin]:
-
             req = SetIO.Request()
-
             req.fun = 1
             req.pin = pin
             req.state = 0.0
-
             self.io_client.call_async(req)
 
-        # Activate requested pin
         req = SetIO.Request()
-
         req.fun = 1
         req.pin = active_pin
         req.state = 1.0
@@ -226,11 +224,32 @@ class GripperCommandNode(Node):
             f"Setting UR5 IO pin {active_pin} HIGH"
         )
 
-        self.io_client.call_async(req)
+        future = self.io_client.call_async(req)
+        future.add_done_callback(self.io_done_callback)
+
+    def io_done_callback(self, future):
+        try:
+            response = future.result()
+
+            if response.success:
+                self.get_logger().info(
+                    "UR5 IO gripper command finished"
+                )
+                self.publish_done(True)
+            else:
+                self.get_logger().error(
+                    "UR5 IO gripper command failed"
+                )
+                self.publish_done(False)
+
+        except Exception as e:
+            self.get_logger().error(
+                f"UR5 IO service error: {e}"
+            )
+            self.publish_done(False)
 
 
 def main(args=None):
-
     rclpy.init(args=args)
 
     node = GripperCommandNode()
@@ -238,7 +257,6 @@ def main(args=None):
     rclpy.spin(node)
 
     node.destroy_node()
-
     rclpy.shutdown()
 
 
