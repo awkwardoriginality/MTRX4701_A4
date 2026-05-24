@@ -302,7 +302,7 @@ class CheckerboardPoseNode(Node):
 
         sphere = SolidPrimitive()
         sphere.type = SolidPrimitive.SPHERE
-        sphere.dimensions = [0.003]
+        sphere.dimensions = [0.001]
 
         bv = BoundingVolume()
         bv.primitives = [sphere]

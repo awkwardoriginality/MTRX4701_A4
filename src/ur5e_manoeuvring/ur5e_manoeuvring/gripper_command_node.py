@@ -65,6 +65,12 @@ class GripperCommandNode(Node):
                 "arm_model must be either 'ur5e' or 'ur5'"
             )
 
+        # Open gripper on startup
+        self.startup_timer = self.create_timer(
+            2.0,
+            self.startup_open_gripper
+        )
+
         self.get_logger().info(
             "Publish 'open' or 'close' to /gripper_command"
         )
@@ -247,6 +253,15 @@ class GripperCommandNode(Node):
                 f"UR5 IO service error: {e}"
             )
             self.publish_done(False)
+
+    def startup_open_gripper(self):
+        self.startup_timer.cancel()
+
+        self.get_logger().info(
+            "Startup: opening gripper"
+        )
+
+        self.open_gripper()
 
 
 def main(args=None):
