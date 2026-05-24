@@ -30,9 +30,10 @@ class LaunchGUI:
 
         self._create_widgets()
 
-    def run_in_terminal(self, command, name):
+    def run_in_terminal(self, command, name, custom_setup=None):
         """Helper to spawn a new Terminal, execute the ROS command, and name the window."""
-        full_command = f"{self.setup_cmd} && {command}"
+        setup = custom_setup if custom_setup is not None else self.setup_cmd
+        full_command = f"{setup} && {command}"
         
         if platform.system() == "Darwin":
             applescript = f'''
@@ -246,7 +247,8 @@ class LaunchGUI:
     def launch_gripper(self):
         port = self.e_port.get()
         cmd = f"ros2 launch robotiq_hande_driver gripper_controller_preview.launch.py use_fake_hardware:=false tty_port:={port}"
-        self.run_in_terminal(cmd, "gripper")
+        custom_setup = "cd ~/robotiq-hande && source /opt/ros/jazzy/setup.bash && source install/setup.bash"
+        self.run_in_terminal(cmd, "gripper", custom_setup=custom_setup)
 
     def run_gripper_command(self):
         open_w = self.e_open_width.get()
