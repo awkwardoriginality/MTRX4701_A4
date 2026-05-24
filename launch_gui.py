@@ -232,12 +232,21 @@ class LaunchGUI:
         # --- 5. Controllers ---
         ttk.Label(self.scrollable_frame, text="5. Controllers", font=("Helvetica", 14, "bold")).grid(row=row, column=0, columnspan=2, pady=(15, 5), sticky="w")
         row += 1
-        f_ctrls = ttk.Frame(self.scrollable_frame)
-        f_ctrls.grid(row=row, column=0, sticky="nw", pady=5)
-        self.t_ctrls = self.create_text_widget(self.scrollable_frame, height=10)
-        self.t_ctrls.grid(row=row, column=1, sticky="nsew", padx=10, pady=5)
-        self.create_launch_kill(f_ctrls, "Run Robot Controller", self.run_robot_controller, "robot_ctrl", self.t_ctrls).pack(anchor="w")
-        self.create_launch_kill(f_ctrls, "Run Game Controller", self.run_game_controller, "game_ctrl", self.t_ctrls).pack(anchor="w", pady=(10,0))
+        
+        # Robot Controller
+        f_robot_ctrl = ttk.Frame(self.scrollable_frame)
+        f_robot_ctrl.grid(row=row, column=0, sticky="nw", pady=5)
+        self.t_robot_ctrl = self.create_text_widget(self.scrollable_frame, height=6)
+        self.t_robot_ctrl.grid(row=row, column=1, sticky="nsew", padx=10, pady=5)
+        self.create_launch_kill(f_robot_ctrl, "Run Robot Controller", self.run_robot_controller, "robot_ctrl", self.t_robot_ctrl).pack(anchor="w")
+        row += 1
+        
+        # Game Controller
+        f_game_ctrl = ttk.Frame(self.scrollable_frame)
+        f_game_ctrl.grid(row=row, column=0, sticky="nw", pady=5)
+        self.t_game_ctrl = self.create_text_widget(self.scrollable_frame, height=6)
+        self.t_game_ctrl.grid(row=row, column=1, sticky="nsew", padx=10, pady=5)
+        self.create_launch_kill(f_game_ctrl, "Run Game Controller", self.run_game_controller, "game_ctrl", self.t_game_ctrl).pack(anchor="w")
         row += 1
 
         # --- 6. Perception ---
@@ -307,11 +316,11 @@ class LaunchGUI:
 
     def run_robot_controller(self):
         cmd = "ros2 run ur5e_manoeuvring ur5e_cartesian_node"
-        self.run_embedded(cmd, "robot_ctrl", self.t_ctrls)
+        self.run_embedded(cmd, "robot_ctrl", self.t_robot_ctrl)
 
     def run_game_controller(self):
         cmd = "ros2 run game_state_machine game_controller"
-        self.run_embedded(cmd, "game_ctrl", self.t_ctrls)
+        self.run_embedded(cmd, "game_ctrl", self.t_game_ctrl)
 
     def run_perception(self):
         yaml_path = self.e_yaml.get()
