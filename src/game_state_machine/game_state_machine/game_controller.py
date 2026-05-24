@@ -57,7 +57,7 @@ class GameController(Node):
         self.board_after_human = None
         self.board_after_robot = None
 
-        self.blocked = True
+        self.blocked = False
         self.robot_done = False
 
         self.robot_retry_count = 0
