@@ -3,17 +3,17 @@ checkers_perception:
     # -------------------------
     # Input source
     # -------------------------
-    input_mode: "bag"        # "ros" or "bag"
+    input_mode: "ros"        # "ros" or "bag"
     bag_path: "/home/eashan-garg/checkers1.bag"  
     image_topic: "/camera/camera/color/image_raw"
 
     # -------------------------
     # Board crop / zoom
     # -------------------------
-    crop_x_min: 0.28
-    crop_x_max: 0.72
-    crop_y_min: 0.18
-    crop_y_max: 0.82
+    crop_x_min: 0.10
+    crop_x_max: 0.90
+    crop_y_min: 0.10
+    crop_y_max: 0.90
     zoom_scale: 2.0
 
     # -------------------------

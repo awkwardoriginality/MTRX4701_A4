@@ -43,7 +43,7 @@ class GripperCommandNode(Node):
             self.gripper_action_client = ActionClient(
                 self,
                 ParallelGripperCommand,
-                "/gripper_action_controller/gripper_cmd",
+                "/gripper/gripper_action_controller/gripper_cmd",
             )
 
             self.get_logger().info(

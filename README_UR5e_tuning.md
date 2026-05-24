@@ -14,7 +14,7 @@ ros2 run ur5e_manoeuvring checkerboard_pose_node --ros-args   -p origin_x:=-0.07
 
 ros2 launch ur_robot_driver ur_control.launch.py \
 ur_type:=ur5e \
-robot_ip:=<UR5E_IP_ADDRESS>
+robot_ip:=192.168.56.101
 
 ros2 launch ur_moveit_config ur_moveit.launch.py ur_type:=ur5e launch_rviz:=true
 
@@ -26,7 +26,7 @@ ros2 run ur5e_manoeuvring bounding_box_node --ros-args   -p board_x:=-0.075   -p
 
 ros2 run ur5e_manoeuvring chessboard_marker_node --ros-args -p origin_x:=-0.075 -p origin_y:=0.20 -p origin_z:=0.00 -p square_size:=0.05 -p rotation_steps:=2
 
-ros2 run ur5e_manoeuvring checkerboard_pose_node --ros-args   -p origin_x:=-0.075   -p origin_y:=0.20   -p origin_z:=0.00   -p square_size:=0.05   -p rotation_steps:=2   -p hover_height:=0.20   -p descent_height:=0.10   -p velocity_scaling:=0.08   -p acceleration_scaling:=0.05   -p lift_height:=0.20
+ros2 run ur5e_manoeuvring checkerboard_pose_node --ros-args   -p origin_x:=-0.075   -p origin_y:=0.20   -p origin_z:=0.00   -p square_size:=0.05   -p rotation_steps:=2   -p hover_height:=0.25   -p descent_height:=0.08   -p velocity_scaling:=0.08   -p acceleration_scaling:=0.05   -p lift_height:=0.08
 
 ## Commands
 ros2 topic pub --once /checkerboard_target std_msgs/msg/String "{data: '0 7'}"

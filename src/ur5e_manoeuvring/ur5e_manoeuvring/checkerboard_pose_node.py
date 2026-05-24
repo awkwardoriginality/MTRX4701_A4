@@ -52,27 +52,27 @@ class CheckerboardPoseNode(Node):
 
         self.home_joint_deg = [
             -180.00,
-            -90.00,
-            -146.00,
-            -213.00,
+            -80.00,
+            -142.00,
+            -227.00,
             -90.00,
             90.00,
         ]
 
         self.home_waypoint_joint_deg = [
             -90.00,
-            -90.00,
-            -146.00,
-            -213.00,
+            -80.00,
+            -142.00,
+            -227.00,
             -90.00,
             90.00,
         ]
 
         self.board_waypoint_joint_deg = [
             -90.0,
-            -119.0,
-            -105.0,
-            -225.0,
+            -113.0,
+            -102.0,
+            -234.0,
             -90.0,
             90.0,
         ]
@@ -302,7 +302,7 @@ class CheckerboardPoseNode(Node):
 
         sphere = SolidPrimitive()
         sphere.type = SolidPrimitive.SPHERE
-        sphere.dimensions = [0.01]
+        sphere.dimensions = [0.003]
 
         bv = BoundingVolume()
         bv.primitives = [sphere]

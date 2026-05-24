@@ -151,12 +151,8 @@ class RobotControllerNode(Node):
 
         if self.waiting_for != "gripper":
             return
-
         if not msg.data:
-            self.get_logger().error("Gripper command failed. Sequence stopped.")
-            self.busy = False
-            self.waiting_for = None
-            self.publish_robot_done(False)
+            self.get_logger().warn("Ignoring /gripper_done = False")
             return
 
         self.get_logger().info("Gripper command done")
