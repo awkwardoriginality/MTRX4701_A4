@@ -6,7 +6,7 @@ from rclpy.node import Node
 
 from std_msgs.msg import Int32MultiArray, Bool, String
 from .game_engine.board import (
-    Board, CB_BLACK, WHITE_MAN, BLACK_MAN, INTERNAL_TO_ROWCOL
+    Board, CB_WHITE, WHITE_MAN, BLACK_MAN, INTERNAL_TO_ROWCOL
 )
 from .game_engine.search import Search
 
@@ -119,14 +119,14 @@ class GameController(Node):
         engine_flat = []
         for v in board:
             if v == 1:
-                engine_flat.append(WHITE_MAN)
-            elif v == 2:
                 engine_flat.append(BLACK_MAN)
+            elif v == 2:
+                engine_flat.append(WHITE_MAN)
             else:
                 engine_flat.append(0)
 
         engine_board = Board.from_flat64(engine_flat)
-        stats = self.search.find_best_move(engine_board, CB_BLACK)
+        stats = self.search.find_best_move(engine_board, CB_WHITE)
 
         if stats.best_move is None:
             return None
