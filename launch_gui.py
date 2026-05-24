@@ -26,7 +26,17 @@ class LaunchGUI:
         self.setup_cmd = f"cd {self.ws_path} && source /opt/ros/jazzy/setup.bash && source install/setup.bash"
         self.processes = {}
 
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.root.bind("<Control-c>", lambda e: self.on_closing())
+        self.root.bind("<Control-q>", lambda e: self.on_closing())
+
         self._create_widgets()
+
+    def on_closing(self):
+        """Cleanup all processes before closing the GUI."""
+        for name in list(self.processes.keys()):
+            self.kill_process(name)
+        self.root.destroy()
 
     def run_embedded(self, command, name, text_widget, custom_setup=None):
         if name in self.processes and self.processes[name].poll() is None:
