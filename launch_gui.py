@@ -106,7 +106,7 @@ class LaunchGUI:
         ttk.Button(f, text="Kill", command=lambda: self.kill_process(name, text_widget), width=5).pack(side=tk.LEFT, pady=2)
         return f
 
-    def create_text_widget(self, parent, height=8):
+    def create_text_widget(self, parent, height=6):
         t = tk.Text(parent, height=height, width=80, state="disabled", bg="#1e1e1e", fg="#00ff00", font=("Courier", 10))
         return t
 
@@ -136,35 +136,48 @@ class LaunchGUI:
         # --- 1. Robot & Arm Control ---
         ttk.Label(self.scrollable_frame, text="1. Robot & Arm Control", font=("Helvetica", 14, "bold")).grid(row=row, column=0, columnspan=2, pady=(15, 5), sticky="w")
         row += 1
+
+        # Arm Hardware
         f_arm = ttk.Frame(self.scrollable_frame)
         f_arm.grid(row=row, column=0, sticky="nw", pady=5)
         self.t_arm = self.create_text_widget(self.scrollable_frame)
         self.t_arm.grid(row=row, column=1, sticky="nsew", padx=10, pady=5)
-        
         ttk.Label(f_arm, text="Robot IP:").pack(anchor="w")
         self.e_robot_ip = ttk.Entry(f_arm, width=15)
         self.e_robot_ip.insert(0, "192.168.56.101")
         self.e_robot_ip.pack(anchor="w", pady=(0, 10))
         self.create_launch_kill(f_arm, "Launch Arm (Hardware)", self.launch_arm, "arm_hw", self.t_arm).pack(anchor="w")
-        self.create_launch_kill(f_arm, "Launch MoveIt", self.launch_moveit, "moveit", self.t_arm).pack(anchor="w")
+        row += 1
+
+        # MoveIt
+        f_moveit = ttk.Frame(self.scrollable_frame)
+        f_moveit.grid(row=row, column=0, sticky="nw", pady=5)
+        self.t_moveit = self.create_text_widget(self.scrollable_frame)
+        self.t_moveit.grid(row=row, column=1, sticky="nsew", padx=10, pady=5)
+        self.create_launch_kill(f_moveit, "Launch MoveIt", self.launch_moveit, "moveit", self.t_moveit).pack(anchor="w")
         row += 1
 
         # --- 2. Gripper ---
         ttk.Label(self.scrollable_frame, text="2. Gripper", font=("Helvetica", 14, "bold")).grid(row=row, column=0, columnspan=2, pady=(15, 5), sticky="w")
         row += 1
+
+        # Gripper Launch
         f_gripper = ttk.Frame(self.scrollable_frame)
         f_gripper.grid(row=row, column=0, sticky="nw", pady=5)
         self.t_gripper = self.create_text_widget(self.scrollable_frame)
         self.t_gripper.grid(row=row, column=1, sticky="nsew", padx=10, pady=5)
-        
         ttk.Label(f_gripper, text="Port:").pack(anchor="w")
         self.e_port = ttk.Entry(f_gripper, width=15)
         self.e_port.insert(0, "/dev/ttyUSB0")
         self.e_port.pack(anchor="w", pady=(0, 10))
         self.create_launch_kill(f_gripper, "Launch Gripper", self.launch_gripper, "gripper", self.t_gripper).pack(anchor="w")
-        
-        f_gcmd = ttk.Frame(f_gripper)
-        f_gcmd.pack(anchor="w", pady=(10, 0))
+        row += 1
+
+        # Gripper Command Node
+        f_gcmd = ttk.Frame(self.scrollable_frame)
+        f_gcmd.grid(row=row, column=0, sticky="nw", pady=5)
+        self.t_gripper_cmd = self.create_text_widget(self.scrollable_frame)
+        self.t_gripper_cmd.grid(row=row, column=1, sticky="nsew", padx=10, pady=5)
         ttk.Label(f_gcmd, text="Open Width:").grid(row=0, column=0, sticky="w")
         self.e_open_width = ttk.Entry(f_gcmd, width=10)
         self.e_open_width.insert(0, "0.025")
@@ -173,70 +186,91 @@ class LaunchGUI:
         self.e_closed_width = ttk.Entry(f_gcmd, width=10)
         self.e_closed_width.insert(0, "0.019")
         self.e_closed_width.grid(row=1, column=1, padx=5)
-        self.create_launch_kill(f_gripper, "Run Gripper Command Node", self.run_gripper_command, "gripper_cmd", self.t_gripper).pack(anchor="w", pady=5)
+        self.create_launch_kill(f_gcmd, "Run Gripper Command Node", self.run_gripper_command, "gripper_cmd", self.t_gripper_cmd).grid(row=2, column=0, columnspan=2, sticky="w", pady=5)
         row += 1
 
         # --- 3. Camera ---
         ttk.Label(self.scrollable_frame, text="3. Camera", font=("Helvetica", 14, "bold")).grid(row=row, column=0, columnspan=2, pady=(15, 5), sticky="w")
         row += 1
+
+        # Camera
         f_cam = ttk.Frame(self.scrollable_frame)
         f_cam.grid(row=row, column=0, sticky="nw", pady=5)
         self.t_cam = self.create_text_widget(self.scrollable_frame)
         self.t_cam.grid(row=row, column=1, sticky="nsew", padx=10, pady=5)
         self.create_launch_kill(f_cam, "Launch Camera", self.launch_camera, "camera", self.t_cam).pack(anchor="w")
-        self.create_launch_kill(f_cam, "Launch RQT", self.launch_rqt, "rqt", self.t_cam).pack(anchor="w")
+        row += 1
+
+        # RQT
+        f_rqt = ttk.Frame(self.scrollable_frame)
+        f_rqt.grid(row=row, column=0, sticky="nw", pady=5)
+        self.t_rqt = self.create_text_widget(self.scrollable_frame)
+        self.t_rqt.grid(row=row, column=1, sticky="nsew", padx=10, pady=5)
+        self.create_launch_kill(f_rqt, "Launch RQT", self.launch_rqt, "rqt", self.t_rqt).pack(anchor="w")
         row += 1
 
         # --- 4. Environment Setup ---
         ttk.Label(self.scrollable_frame, text="4. Environment Setup", font=("Helvetica", 14, "bold")).grid(row=row, column=0, columnspan=2, pady=(15, 5), sticky="w")
         row += 1
-        
-        f_env = ttk.Frame(self.scrollable_frame)
-        f_env.grid(row=row, column=0, sticky="nw", pady=5)
-        self.t_env = self.create_text_widget(self.scrollable_frame, height=14)
-        self.t_env.grid(row=row, column=1, sticky="nsew", padx=10, pady=5)
 
-        ttk.Label(f_env, text="Bounding Box:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(0, 5))
-        f_bbox = ttk.Frame(f_env)
-        f_bbox.pack(anchor="w", pady=(0, 10))
+        # Bounding Box
+        f_bbox = ttk.Frame(self.scrollable_frame)
+        f_bbox.grid(row=row, column=0, sticky="nw", pady=5)
+        self.t_bbox = self.create_text_widget(self.scrollable_frame)
+        self.t_bbox.grid(row=row, column=1, sticky="nsew", padx=10, pady=5)
+        ttk.Label(f_bbox, text="Bounding Box:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(0, 5))
+        f_bbox_params = ttk.Frame(f_bbox)
+        f_bbox_params.pack(anchor="w", pady=(0, 10))
         self.bbox_entries = {}
         bbox_params = [("board_x", "-0.075"), ("board_y", "0.20"), ("board_z", "0.0"), 
                        ("front_dist", "0.50"), ("back_dist", "0.50"), ("right_dist", "1.00"), ("left_dist", "0.40")]
         for i, (param, def_val) in enumerate(bbox_params):
-            ttk.Label(f_bbox, text=f"{param}:").grid(row=i//2, column=(i%2)*2, padx=5, pady=2, sticky="e")
-            ent = ttk.Entry(f_bbox, width=6)
+            ttk.Label(f_bbox_params, text=f"{param}:").grid(row=i//2, column=(i%2)*2, padx=5, pady=2, sticky="e")
+            ent = ttk.Entry(f_bbox_params, width=6)
             ent.insert(0, def_val)
             ent.grid(row=i//2, column=(i%2)*2+1, sticky="w")
             self.bbox_entries[param] = ent
-        self.create_launch_kill(f_env, "Launch Bounding Box", self.launch_bounding_box, "bbox", self.t_env).pack(anchor="w")
+        self.create_launch_kill(f_bbox, "Launch Bounding Box", self.launch_bounding_box, "bbox", self.t_bbox).pack(anchor="w")
+        row += 1
 
-        ttk.Label(f_env, text="Marker:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(10, 5))
-        f_marker = ttk.Frame(f_env)
-        f_marker.pack(anchor="w", pady=(0, 10))
+        # Checker Board Marker
+        f_marker = ttk.Frame(self.scrollable_frame)
+        f_marker.grid(row=row, column=0, sticky="nw", pady=5)
+        self.t_marker = self.create_text_widget(self.scrollable_frame)
+        self.t_marker.grid(row=row, column=1, sticky="nsew", padx=10, pady=5)
+        ttk.Label(f_marker, text="Marker:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(0, 5))
+        f_marker_params = ttk.Frame(f_marker)
+        f_marker_params.pack(anchor="w", pady=(0, 10))
         self.marker_entries = {}
         marker_params = [("origin_x", "-0.075"), ("origin_y", "0.020"), ("origin_z", "0.00"), ("square_size", "0.05"), ("rotation_steps", "2")]
         for i, (param, def_val) in enumerate(marker_params):
-            ttk.Label(f_marker, text=f"{param}:").grid(row=i//2, column=(i%2)*2, padx=5, pady=2, sticky="e")
-            ent = ttk.Entry(f_marker, width=6)
+            ttk.Label(f_marker_params, text=f"{param}:").grid(row=i//2, column=(i%2)*2, padx=5, pady=2, sticky="e")
+            ent = ttk.Entry(f_marker_params, width=6)
             ent.insert(0, def_val)
             ent.grid(row=i//2, column=(i%2)*2+1, sticky="w")
             self.marker_entries[param] = ent
-        self.create_launch_kill(f_env, "Publish Checker Board Marker", self.launch_checkerboard_marker, "cb_marker", self.t_env).pack(anchor="w")
+        self.create_launch_kill(f_marker, "Publish Checker Board Marker", self.launch_checkerboard_marker, "cb_marker", self.t_marker).pack(anchor="w")
+        row += 1
 
-        ttk.Label(f_env, text="Pose Node:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(10, 5))
-        f_pose = ttk.Frame(f_env)
-        f_pose.pack(anchor="w", pady=(0, 10))
+        # Checkerboard Pose Node
+        f_pose = ttk.Frame(self.scrollable_frame)
+        f_pose.grid(row=row, column=0, sticky="nw", pady=5)
+        self.t_pose = self.create_text_widget(self.scrollable_frame)
+        self.t_pose.grid(row=row, column=1, sticky="nsew", padx=10, pady=5)
+        ttk.Label(f_pose, text="Pose Node:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(0, 5))
+        f_pose_params = ttk.Frame(f_pose)
+        f_pose_params.pack(anchor="w", pady=(0, 10))
         self.pose_entries = {}
         pose_params = [("x", "-0.075"), ("y", "0.20"), ("z", "0.00"), ("square_size", "0.05"), ("rotation_steps", "2"), 
                        ("hover_height", "0.25"), ("descent_height", "0.08"), ("velocity_scaling", "0.08"), 
                        ("acceleration_scaling", "0.05"), ("lift_height", "0.08")]
         for i, (param, def_val) in enumerate(pose_params):
-            ttk.Label(f_pose, text=f"{param}:").grid(row=i//3, column=(i%3)*2, padx=5, pady=2, sticky="e")
-            ent = ttk.Entry(f_pose, width=5)
+            ttk.Label(f_pose_params, text=f"{param}:").grid(row=i//3, column=(i%3)*2, padx=5, pady=2, sticky="e")
+            ent = ttk.Entry(f_pose_params, width=5)
             ent.insert(0, def_val)
             ent.grid(row=i//3, column=(i%3)*2+1, sticky="w")
             self.pose_entries[param] = ent
-        self.create_launch_kill(f_env, "Run Checkerboard Pose Node", self.run_checkerboard_pose, "cb_pose", self.t_env).pack(anchor="w")
+        self.create_launch_kill(f_pose, "Run Checkerboard Pose Node", self.run_checkerboard_pose, "cb_pose", self.t_pose).pack(anchor="w")
         row += 1
 
         # --- 5. Controllers ---
@@ -246,7 +280,7 @@ class LaunchGUI:
         # Robot Controller
         f_robot_ctrl = ttk.Frame(self.scrollable_frame)
         f_robot_ctrl.grid(row=row, column=0, sticky="nw", pady=5)
-        self.t_robot_ctrl = self.create_text_widget(self.scrollable_frame, height=6)
+        self.t_robot_ctrl = self.create_text_widget(self.scrollable_frame)
         self.t_robot_ctrl.grid(row=row, column=1, sticky="nsew", padx=10, pady=5)
         self.create_launch_kill(f_robot_ctrl, "Run Robot Controller", self.run_robot_controller, "robot_ctrl", self.t_robot_ctrl).pack(anchor="w")
         row += 1
@@ -254,7 +288,7 @@ class LaunchGUI:
         # Game Controller
         f_game_ctrl = ttk.Frame(self.scrollable_frame)
         f_game_ctrl.grid(row=row, column=0, sticky="nw", pady=5)
-        self.t_game_ctrl = self.create_text_widget(self.scrollable_frame, height=6)
+        self.t_game_ctrl = self.create_text_widget(self.scrollable_frame)
         self.t_game_ctrl.grid(row=row, column=1, sticky="nsew", padx=10, pady=5)
         self.create_launch_kill(f_game_ctrl, "Run Game Controller", self.run_game_controller, "game_ctrl", self.t_game_ctrl).pack(anchor="w")
         row += 1
@@ -282,7 +316,7 @@ class LaunchGUI:
 
     def launch_moveit(self):
         cmd = "ros2 launch ur_moveit_config ur_moveit.launch.py ur_type:=ur5e launch_rviz:=true"
-        self.run_embedded(cmd, "moveit", self.t_arm)
+        self.run_embedded(cmd, "moveit", self.t_moveit)
 
     def launch_gripper(self):
         port = self.e_port.get()
@@ -294,14 +328,14 @@ class LaunchGUI:
         open_w = self.e_open_width.get()
         closed_w = self.e_closed_width.get()
         cmd = f"ros2 run ur5e_manoeuvring gripper_command_node --ros-args -p arm_model:=ur5e -p open_position:={open_w} -p closed_position:={closed_w}"
-        self.run_embedded(cmd, "gripper_cmd", self.t_gripper)
+        self.run_embedded(cmd, "gripper_cmd", self.t_gripper_cmd)
 
     def launch_bounding_box(self):
         args = []
         for param, ent in self.bbox_entries.items():
             args.append(f"-p {param}:={ent.get()}")
         cmd = f"ros2 run ur5e_manoeuvring bounding_box_node --ros-args {' '.join(args)}"
-        self.run_embedded(cmd, "bbox", self.t_env)
+        self.run_embedded(cmd, "bbox", self.t_bbox)
 
     def launch_camera(self):
         cmd = "ros2 launch realsense2_camera rs_launch.py"
@@ -312,7 +346,7 @@ class LaunchGUI:
         for param, ent in self.marker_entries.items():
             args.append(f"-p {param}:={ent.get()}")
         cmd = f"ros2 run ur5e_manoeuvring chessboard_marker_node --ros-args {' '.join(args)}"
-        self.run_embedded(cmd, "cb_marker", self.t_env)
+        self.run_embedded(cmd, "cb_marker", self.t_marker)
 
     def run_checkerboard_pose(self):
         args = []
@@ -322,7 +356,7 @@ class LaunchGUI:
                 p_name = f"origin_{param}"
             args.append(f"-p {p_name}:={ent.get()}")
         cmd = f"ros2 run ur5e_manoeuvring checkerboard_pose_node --ros-args {' '.join(args)}"
-        self.run_embedded(cmd, "cb_pose", self.t_env)
+        self.run_embedded(cmd, "cb_pose", self.t_pose)
 
     def run_robot_controller(self):
         cmd = "ros2 run ur5e_manoeuvring ur5e_cartesian_node"
@@ -339,7 +373,7 @@ class LaunchGUI:
 
     def launch_rqt(self):
         cmd = "ros2 run rqt_image_view rqt_image_view /checkers/warped_view"
-        self.run_embedded(cmd, "rqt", self.t_cam)
+        self.run_embedded(cmd, "rqt", self.t_rqt)
 
 if __name__ == "__main__":
     root = tk.Tk()
