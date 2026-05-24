@@ -72,6 +72,7 @@ class RobotControllerNode(Node):
             from_col = int(data["from"][1])
             to_row = int(data["to"][0])
             to_col = int(data["to"][1])
+            path = data.get("path", [])
             captured = data.get("captured", [])
 
         except Exception as e:
@@ -84,6 +85,16 @@ class RobotControllerNode(Node):
             ("arm", f"{from_row} {from_col}"),
             ("gripper", "close"),
             ("arm", "lift"),
+        ]
+
+        for mid in path:
+            mid_row, mid_col = int(mid[0]), int(mid[1])
+            self.sequence += [
+                ("arm", f"{mid_row} {mid_col}"),
+                ("arm", "lift"),
+            ]
+
+        self.sequence += [
             ("arm", f"{to_row} {to_col}"),
             ("gripper", "open"),
             ("arm", "lift"),

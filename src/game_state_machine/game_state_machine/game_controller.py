@@ -144,7 +144,12 @@ class GameController(Node):
             r, c_eng = INTERNAL_TO_ROWCOL[sq]
             captured.append((r, 7 - c_eng))
 
-        return (from_row, 7 - from_col_eng), (to_row, 7 - to_col_eng), captured
+        path = []
+        for sq in move.path_squares[1:-1]:
+            r, c_eng = INTERNAL_TO_ROWCOL[sq]
+            path.append((r, 7 - c_eng))
+
+        return (from_row, 7 - from_col_eng), (to_row, 7 - to_col_eng), captured, path
 
     def publish_robot_move(self):
         move = self.find_best_purple_move(self.board_after_human)
@@ -156,7 +161,7 @@ class GameController(Node):
             self.state = "MANUAL_RESET_REQUIRED"
             return
 
-        from_square, to_square, captured = move
+        from_square, to_square, captured, path = move
 
         self.last_robot_move = move
 
@@ -164,6 +169,7 @@ class GameController(Node):
         msg.data = json.dumps({
             "from": [from_square[0], from_square[1]],
             "to": [to_square[0], to_square[1]],
+            "path": [[r, c] for r, c in path],
             "captured": [[r, c] for r, c in captured],
         })
 

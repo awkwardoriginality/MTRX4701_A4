@@ -190,7 +190,7 @@ class CheckerboardPoseNode(Node):
         if text in ["discard", "side"]:
             self.get_logger().info("Discard command: moving HOME WAYPOINT -> DISCARD")
             self.reset_motion_state()
-            self.send_joint_goal(self.home_waypoint_joint_deg, "waypoint_before_discard")
+            self.send_joint_goal(self.board_waypoint_joint_deg, "waypoint_before_discard")
             return
 
         try:
