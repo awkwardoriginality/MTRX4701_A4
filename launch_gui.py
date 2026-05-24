@@ -33,9 +33,9 @@ class LaunchGUI:
     def run_in_terminal(self, command, name, custom_setup=None):
         """Helper to spawn a new Terminal, execute the ROS command, and name the window."""
         setup = custom_setup if custom_setup is not None else self.setup_cmd
-        full_command = f"{setup} && {command}"
         
         if platform.system() == "Darwin":
+            full_command = f"{setup} && {command}"
             applescript = f'''
             tell application "Terminal"
                 set newTab to do script "{full_command}"
@@ -48,8 +48,11 @@ class LaunchGUI:
             except Exception as e:
                 messagebox.showerror("Launch Error", f"Failed to open terminal:\n{e}")
         else:
+            # On Linux, we write the bash PID to a temp file, then `exec` the ROS node 
+            # so it inherits that exact PID. This lets us kill it perfectly without wmctrl.
+            wrapper = f"echo $$ > /tmp/ros_gui_{name}.pid && {setup} && exec {command}"
             try:
-                subprocess.Popen(["gnome-terminal", "--title", name, "--", "bash", "-c", full_command])
+                subprocess.Popen(["gnome-terminal", "--title", name, "--", "bash", "-c", wrapper])
             except Exception as e:
                 messagebox.showerror("Launch Error", f"Failed to open terminal:\n{e}")
 
@@ -74,12 +77,25 @@ class LaunchGUI:
             except Exception as e:
                 messagebox.showerror("Kill Error", f"Failed to close terminal:\n{e}")
         else:
-            try:
-                subprocess.run(["wmctrl", "-c", name], check=True)
-            except FileNotFoundError:
-                messagebox.showerror("Missing Dependency", f"To close the '{name}' terminal on Linux, the 'wmctrl' tool is required.\nPlease run:\nsudo apt install wmctrl")
-            except Exception as e:
-                messagebox.showerror("Kill Error", f"Failed to close '{name}' terminal:\n{e}")
+            pid_file = f"/tmp/ros_gui_{name}.pid"
+            if os.path.exists(pid_file):
+                try:
+                    with open(pid_file, "r") as f:
+                        pid_str = f.read().strip()
+                        if pid_str:
+                            pid = int(pid_str)
+                            import signal
+                            # Send SIGINT to smoothly shut down the ROS 2 node
+                            os.kill(pid, signal.SIGINT)
+                except ProcessLookupError:
+                    pass # Process already exited
+                except Exception as e:
+                    messagebox.showerror("Kill Error", f"Failed to close '{name}' terminal:\n{e}")
+                finally:
+                    try:
+                        os.remove(pid_file)
+                    except:
+                        pass
 
     def create_launch_kill(self, parent, text, launch_func, name):
         f = ttk.Frame(parent)
