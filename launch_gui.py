@@ -57,6 +57,26 @@ class LaunchGUI:
             except Exception as e:
                 messagebox.showerror("Launch Error", f"Failed to open terminal:\n{e}")
 
+    def run_in_background(self, command, name, custom_setup=None):
+        """Helper to spawn a background process without opening a visible terminal."""
+        setup = custom_setup if custom_setup is not None else self.setup_cmd
+        full_command = f"{setup} && {command}"
+        
+        if name in self.processes and self.processes[name].poll() is None:
+            messagebox.showwarning("Already Running", f"Process '{name}' is already running.")
+            return
+
+        try:
+            p = subprocess.Popen(
+                ["/bin/bash", "-c", full_command],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid
+            )
+            self.processes[name] = p
+        except Exception as e:
+            messagebox.showerror("Launch Error", f"Failed to start process:\n{e}")
+
     def kill_terminal(self, name):
         """Helper to find and kill the foreground terminal window or background process."""
         if name in self.processes:
@@ -291,7 +311,7 @@ class LaunchGUI:
         open_w = self.e_open_width.get()
         closed_w = self.e_closed_width.get()
         cmd = f"ros2 run ur5e_manoeuvring gripper_command_node --ros-args -p arm_model:=ur5e -p open_position:={open_w} -p closed_position:={closed_w}"
-        self.run_in_terminal(cmd, "gripper_cmd")
+        self.run_in_background(cmd, "gripper_cmd")
 
     def launch_bounding_box(self):
         args = []
@@ -309,7 +329,7 @@ class LaunchGUI:
         for param, ent in self.marker_entries.items():
             args.append(f"-p {param}:={ent.get()}")
         cmd = f"ros2 run ur5e_manoeuvring chessboard_marker_node --ros-args {' '.join(args)}"
-        self.run_in_terminal(cmd, "cb_marker")
+        self.run_in_background(cmd, "cb_marker")
 
     def run_checkerboard_pose(self):
         args = []
