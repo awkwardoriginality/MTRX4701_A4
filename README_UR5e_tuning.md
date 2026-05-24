@@ -36,7 +36,6 @@ ros2 topic pub --once /gripper_command std_msgs/msg/String \
 
 or
 
-ros2 run game_state_machine robot_controller
 ros2 topic pub --once /robot_move std_msgs/msg/String "{data: '{\"from\":[0,7], \"to\":[7,0]}'}"
 ros2 topic pub --once /gripper_done std_msgs/msg/Bool "{data: true}"
 
@@ -44,6 +43,7 @@ ros2 topic pub --once /gripper_done std_msgs/msg/Bool "{data: true}"
 
 
 ## State machine
+ros2 run game_state_machine robot_controller
 ros2 run game_state_machine game_controller
 ros2 run perception checkers_perception --ros-args --params-file src/perception/config/checkers_perception.yaml
 ros2 launch realsense2_camera rs_launch.py

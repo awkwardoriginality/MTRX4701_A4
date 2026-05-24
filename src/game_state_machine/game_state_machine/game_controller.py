@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 
 import json
-import random
 import rclpy
 from rclpy.node import Node
 
 from std_msgs.msg import Int32MultiArray, Bool, String
+from .game_engine.board import (
+    Board, CB_BLACK, WHITE_MAN, BLACK_MAN, INTERNAL_TO_ROWCOL
+)
+from .game_engine.search import Search
 
 
 class GameController(Node):
@@ -62,6 +65,8 @@ class GameController(Node):
 
         self.last_robot_move = None
 
+        self.search = Search(max_time=3.0)
+
         self.state = "WAIT_INITIAL_CLEAR"
 
         self.timer = self.create_timer(0.2, self.control_loop)
@@ -110,52 +115,33 @@ class GameController(Node):
     def in_bounds(self, row, col):
         return 0 <= row < 8 and 0 <= col < 8
 
-    def find_random_purple_diagonal_move(self, board):
-        empty_value = int(self.get_parameter("empty_value").value)
-        purple_value = int(self.get_parameter("purple_value").value)
+    def find_best_purple_move(self, board):
+        engine_flat = []
+        for v in board:
+            if v == 1:
+                engine_flat.append(WHITE_MAN)
+            elif v == 2:
+                engine_flat.append(BLACK_MAN)
+            else:
+                engine_flat.append(0)
 
-        possible_moves = []
+        engine_board = Board.from_flat64(engine_flat)
+        stats = self.search.find_best_move(engine_board, CB_BLACK)
 
-        diagonal_steps = [
-            (-1, -1),
-            (-1, 1),
-            (1, -1),
-            (1, 1),
-        ]
-
-        for index, value in enumerate(board):
-            if value != purple_value:
-                continue
-
-            row, col = self.index_to_row_col(index)
-
-            for dr, dc in diagonal_steps:
-                new_row = row + dr
-                new_col = col + dc
-
-                if not self.in_bounds(new_row, new_col):
-                    continue
-
-                new_index = self.row_col_to_index(new_row, new_col)
-
-                if board[new_index] == empty_value:
-                    possible_moves.append(
-                        ((row, col), (new_row, new_col))
-                    )
-
-        if len(possible_moves) == 0:
+        if stats.best_move is None:
             return None
 
-        return random.choice(possible_moves)
+        move = stats.best_move
+        from_row, from_col = INTERNAL_TO_ROWCOL[move.from_sq]
+        to_row, to_col = INTERNAL_TO_ROWCOL[move.to_sq]
+        return (from_row, from_col), (to_row, to_col)
 
     def publish_robot_move(self):
-        move = self.find_random_purple_diagonal_move(
-            self.board_after_human
-        )
+        move = self.find_best_purple_move(self.board_after_human)
 
         if move is None:
             self.publish_status(
-                "ERROR: No valid purple diagonal move found."
+                "ERROR: No valid move found for robot."
             )
             self.state = "MANUAL_RESET_REQUIRED"
             return
