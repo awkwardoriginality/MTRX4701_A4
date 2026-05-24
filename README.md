@@ -108,7 +108,14 @@ square_size      # checkerboard square size (metres) -> 0.05 = 5 cm
 rotation_steps   # board rotation: 0=0°, 1=90°, 2=180°, 3=270°
 
 #### To add a bounding box
-ros2 run ur5e_manoeuvring bounding_box_node
+ros2 run ur5e_manoeuvring bounding_box_node --ros-args \
+  -p x:=0.0 \
+  -p y:=0.0 \
+  -p z:=0.0 \
+  -p front_distance:=0.0 \
+  -p back_distance:=0.0 \
+  -p right_distance:=0.0 \
+  -p left_distance:=0.0
 
 #### To run cartesian goal sending node
 sudo apt install ros-jazzy-tf-transformations
