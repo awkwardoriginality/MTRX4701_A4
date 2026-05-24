@@ -116,14 +116,18 @@ class GameController(Node):
         return 0 <= row < 8 and 0 <= col < 8
 
     def find_best_purple_move(self, board):
-        engine_flat = []
-        for v in board:
+        # The perception board uses the opposite column parity to the engine's
+        # dark squares, so we mirror columns (7 - col) on the way in and out.
+        engine_flat = [0] * 64
+        for idx, v in enumerate(board):
+            if v == 0:
+                continue
+            row = idx // 8
+            col = 7 - (idx % 8)
             if v == 1:
-                engine_flat.append(BLACK_MAN)
+                engine_flat[row * 8 + col] = BLACK_MAN
             elif v == 2:
-                engine_flat.append(WHITE_MAN)
-            else:
-                engine_flat.append(0)
+                engine_flat[row * 8 + col] = WHITE_MAN
 
         engine_board = Board.from_flat64(engine_flat)
         stats = self.search.find_best_move(engine_board, CB_WHITE)
@@ -132,9 +136,9 @@ class GameController(Node):
             return None
 
         move = stats.best_move
-        from_row, from_col = INTERNAL_TO_ROWCOL[move.from_sq]
-        to_row, to_col = INTERNAL_TO_ROWCOL[move.to_sq]
-        return (from_row, from_col), (to_row, to_col)
+        from_row, from_col_eng = INTERNAL_TO_ROWCOL[move.from_sq]
+        to_row, to_col_eng = INTERNAL_TO_ROWCOL[move.to_sq]
+        return (from_row, 7 - from_col_eng), (to_row, 7 - to_col_eng)
 
     def publish_robot_move(self):
         move = self.find_best_purple_move(self.board_after_human)
