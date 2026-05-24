@@ -9,6 +9,7 @@ from tkinter import ttk, messagebox
 import subprocess
 import signal
 import platform
+import threading
 
 class LaunchGUI:
     def __init__(self, root):
@@ -57,7 +58,18 @@ class LaunchGUI:
                 messagebox.showerror("Launch Error", f"Failed to open terminal:\n{e}")
 
     def kill_terminal(self, name):
-        """Helper to find and kill the foreground terminal window."""
+        """Helper to find and kill the foreground terminal window or background process."""
+        if name in self.processes:
+            p = self.processes[name]
+            if p.poll() is None:
+                try:
+                    os.killpg(os.getpgid(p.pid), signal.SIGINT)
+                    p.wait(timeout=2)
+                except Exception as e:
+                    pass
+            del self.processes[name]
+            return
+
         if platform.system() == "Darwin":
             applescript = f'''
             tell application "Terminal"
@@ -236,8 +248,15 @@ class LaunchGUI:
         row += 1
 
         self.create_launch_kill(self.scrollable_frame, "Run Robot Controller", self.run_robot_controller, "robot_ctrl").grid(row=row, column=0, padx=5, pady=5, sticky="w")
-        self.create_launch_kill(self.scrollable_frame, "Run Game Controller", self.run_game_controller, "game_ctrl").grid(row=row+1, column=0, padx=5, pady=5, sticky="w")
-        row += 2
+        row += 1
+
+        f_game = ttk.Frame(self.scrollable_frame)
+        f_game.grid(row=row, column=0, columnspan=2, sticky="w", pady=5)
+        self.create_launch_kill(f_game, "Run Game Controller", self.run_game_controller_in_gui, "game_ctrl").pack(anchor="w")
+        
+        self.t_game_output = tk.Text(f_game, height=10, width=60, state="disabled", bg="black", fg="white", font=("Courier", 10))
+        self.t_game_output.pack(pady=5)
+        row += 1
 
         # --- 6. Perception ---
         ttk.Label(self.scrollable_frame, text="6. Perception", font=("Helvetica", 14, "bold")).grid(row=row, column=0, columnspan=2, pady=(15, 5), sticky="w")
@@ -306,9 +325,47 @@ class LaunchGUI:
         cmd = "ros2 run ur5e_manoeuvring ur5e_cartesian_node"
         self.run_in_terminal(cmd, "robot_ctrl")
 
-    def run_game_controller(self):
-        cmd = "ros2 run game_state_machine game_controller"
-        self.run_in_terminal(cmd, "game_ctrl")
+    def run_game_controller_in_gui(self):
+        name = "game_ctrl"
+        if name in self.processes and self.processes[name].poll() is None:
+            messagebox.showwarning("Already Running", f"Process '{name}' is already running.")
+            return
+
+        command = "ros2 run game_state_machine game_controller"
+        full_command = f"{self.setup_cmd} && export PYTHONUNBUFFERED=1 && {command}"
+        
+        self.t_game_output.config(state="normal")
+        self.t_game_output.delete("1.0", tk.END)
+        self.t_game_output.config(state="disabled")
+
+        try:
+            p = subprocess.Popen(
+                ["/bin/bash", "-c", full_command],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                preexec_fn=os.setsid
+            )
+            self.processes[name] = p
+            
+            t = threading.Thread(target=self._read_output, args=(p, self.t_game_output), daemon=True)
+            t.start()
+        except Exception as e:
+            messagebox.showerror("Launch Error", f"Failed to start game controller:\n{e}")
+
+    def _read_output(self, process, text_widget):
+        for line in iter(process.stdout.readline, ''):
+            if not line:
+                break
+            self.root.after(0, self._append_text, text_widget, line)
+        process.stdout.close()
+
+    def _append_text(self, text_widget, text):
+        text_widget.config(state="normal")
+        text_widget.insert(tk.END, text)
+        text_widget.see(tk.END)
+        text_widget.config(state="disabled")
 
     def run_perception(self):
         yaml_path = self.e_yaml.get()
