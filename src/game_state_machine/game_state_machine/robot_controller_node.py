@@ -72,6 +72,7 @@ class RobotControllerNode(Node):
             from_col = int(data["from"][1])
             to_row = int(data["to"][0])
             to_col = int(data["to"][1])
+            captured = data.get("captured", [])
 
         except Exception as e:
             self.get_logger().error(
@@ -86,8 +87,19 @@ class RobotControllerNode(Node):
             ("arm", f"{to_row} {to_col}"),
             ("gripper", "open"),
             ("arm", "lift"),
-            ("arm", "home"),
         ]
+
+        for cap in captured:
+            cap_row, cap_col = int(cap[0]), int(cap[1])
+            self.sequence += [
+                ("arm", f"{cap_row} {cap_col}"),
+                ("gripper", "close"),
+                ("arm", "lift"),
+                ("arm", "discard"),
+                ("gripper", "open"),
+            ]
+
+        self.sequence.append(("arm", "home"))
 
         self.busy = True
         self.step_index = 0

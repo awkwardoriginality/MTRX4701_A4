@@ -77,6 +77,15 @@ class CheckerboardPoseNode(Node):
             90.0,
         ]
 
+        self.discard_joint_deg = [
+            -51.35,
+            -123.28,
+            -84.90,
+            -242.32,
+            -90.10,
+            90.36,
+        ]
+
         self.move_client = ActionClient(self, MoveGroup, "/move_action")
 
         self.motion_done_pub = self.create_publisher(
@@ -176,6 +185,12 @@ class CheckerboardPoseNode(Node):
 
         if text in ["lift", "raise", "up"]:
             self.send_lift_goal()
+            return
+
+        if text in ["discard", "side"]:
+            self.get_logger().info("Discard command: moving HOME WAYPOINT -> DISCARD")
+            self.reset_motion_state()
+            self.send_joint_goal(self.home_waypoint_joint_deg, "waypoint_before_discard")
             return
 
         try:
@@ -382,6 +397,11 @@ class CheckerboardPoseNode(Node):
             if self.current_stage == "waypoint_before_home":
                 self.get_logger().info("Home waypoint reached. Moving to HOME.")
                 self.send_joint_goal(self.home_joint_deg, "home")
+                return
+
+            if self.current_stage == "waypoint_before_discard":
+                self.get_logger().info("Discard waypoint reached. Moving to DISCARD.")
+                self.send_joint_goal(self.discard_joint_deg, "discard")
                 return
 
             if self.current_stage == "waypoint_before_board":
