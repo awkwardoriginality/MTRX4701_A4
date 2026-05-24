@@ -8,6 +8,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import subprocess
 import signal
+import platform
 
 class LaunchGUI:
     def __init__(self, root):
@@ -29,45 +30,58 @@ class LaunchGUI:
 
         self._create_widgets()
 
-    def run_in_background(self, command, name):
-        """Helper to spawn a background process executing the ROS command."""
+    def run_in_terminal(self, command, name):
+        """Helper to spawn a new Terminal, execute the ROS command, and name the window."""
         full_command = f"{self.setup_cmd} && {command}"
         
-        if name in self.processes and self.processes[name].poll() is None:
-            messagebox.showwarning("Already Running", f"Process '{name}' is already running.")
-            return
-
-        try:
-            # Use preexec_fn=os.setsid to create a process group for safe killing
-            p = subprocess.Popen(
-                ["/bin/bash", "-c", full_command],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                preexec_fn=os.setsid
-            )
-            self.processes[name] = p
-        except Exception as e:
-            messagebox.showerror("Launch Error", f"Failed to start process:\n{e}")
-
-    def kill_process(self, name):
-        """Helper to find and kill the background process group."""
-        if name in self.processes:
-            p = self.processes[name]
-            if p.poll() is None:
-                try:
-                    os.killpg(os.getpgid(p.pid), signal.SIGTERM)
-                    p.wait(timeout=2)
-                except Exception as e:
-                    messagebox.showerror("Kill Error", f"Failed to kill process:\n{e}")
-            else:
-                pass # Process already exited
+        if platform.system() == "Darwin":
+            applescript = f'''
+            tell application "Terminal"
+                set newTab to do script "{full_command}"
+                set custom title of newTab to "{name}"
+                activate
+            end tell
+            '''
+            try:
+                subprocess.run(["osascript", "-e", applescript], check=True)
+            except Exception as e:
+                messagebox.showerror("Launch Error", f"Failed to open terminal:\n{e}")
         else:
-            pass # Process never started
+            try:
+                subprocess.Popen(["gnome-terminal", "--title", name, "--", "bash", "-c", full_command])
+            except Exception as e:
+                messagebox.showerror("Launch Error", f"Failed to open terminal:\n{e}")
+
+    def kill_terminal(self, name):
+        """Helper to find and kill the foreground terminal window."""
+        if platform.system() == "Darwin":
+            applescript = f'''
+            tell application "Terminal"
+                set windowList to windows
+                repeat with w in windowList
+                    set tabList to tabs of w
+                    repeat with t in tabList
+                        if custom title of t is "{name}" then
+                            close w
+                        end if
+                    end repeat
+                end repeat
+            end tell
+            '''
+            try:
+                subprocess.run(["osascript", "-e", applescript], check=True)
+            except Exception as e:
+                messagebox.showerror("Kill Error", f"Failed to close terminal:\n{e}")
+        else:
+            try:
+                subprocess.run(["wmctrl", "-c", name], check=True)
+            except Exception as e:
+                messagebox.showerror("Kill Error", f"Failed to close terminal:\n{e}")
 
     def create_launch_kill(self, parent, text, launch_func, name):
         f = ttk.Frame(parent)
         ttk.Button(f, text=text, command=launch_func).pack(side=tk.LEFT, padx=(0, 2))
-        ttk.Button(f, text="Kill", command=lambda: self.kill_process(name), width=5).pack(side=tk.LEFT)
+        ttk.Button(f, text="Kill", command=lambda: self.kill_terminal(name), width=5).pack(side=tk.LEFT)
         return f
 
     def _create_widgets(self):
@@ -223,40 +237,40 @@ class LaunchGUI:
     def launch_arm(self):
         ip = self.e_robot_ip.get()
         cmd = f"ros2 launch ur_robot_driver ur_control.launch.py ur_type:=ur5e robot_ip:={ip}"
-        self.run_in_background(cmd, "arm_hw")
+        self.run_in_terminal(cmd, "arm_hw")
 
     def launch_moveit(self):
         cmd = "ros2 launch ur_moveit_config ur_moveit.launch.py ur_type:=ur5e launch_rviz:=true"
-        self.run_in_background(cmd, "moveit")
+        self.run_in_terminal(cmd, "moveit")
 
     def launch_gripper(self):
         port = self.e_port.get()
         cmd = f"ros2 launch robotiq_hande_driver gripper_controller_preview.launch.py use_fake_hardware:=false tty_port:={port}"
-        self.run_in_background(cmd, "gripper")
+        self.run_in_terminal(cmd, "gripper")
 
     def run_gripper_command(self):
         open_w = self.e_open_width.get()
         closed_w = self.e_closed_width.get()
         cmd = f"ros2 run ur5e_manoeuvring gripper_command_node --ros-args -p arm_model:=ur5e -p open_position:={open_w} -p closed_position:={closed_w}"
-        self.run_in_background(cmd, "gripper_cmd")
+        self.run_in_terminal(cmd, "gripper_cmd")
 
     def launch_bounding_box(self):
         args = []
         for param, ent in self.bbox_entries.items():
             args.append(f"-p {param}:={ent.get()}")
         cmd = f"ros2 run ur5e_manoeuvring bounding_box_node --ros-args {' '.join(args)}"
-        self.run_in_background(cmd, "bbox")
+        self.run_in_terminal(cmd, "bbox")
 
     def launch_camera(self):
         cmd = "ros2 launch realsense2_camera rs_launch.py"
-        self.run_in_background(cmd, "camera")
+        self.run_in_terminal(cmd, "camera")
 
     def launch_checkerboard_marker(self):
         args = []
         for param, ent in self.marker_entries.items():
             args.append(f"-p {param}:={ent.get()}")
         cmd = f"ros2 run ur5e_manoeuvring chessboard_marker_node --ros-args {' '.join(args)}"
-        self.run_in_background(cmd, "cb_marker")
+        self.run_in_terminal(cmd, "cb_marker")
 
     def run_checkerboard_pose(self):
         args = []
@@ -266,24 +280,24 @@ class LaunchGUI:
                 p_name = f"origin_{param}"
             args.append(f"-p {p_name}:={ent.get()}")
         cmd = f"ros2 run ur5e_manoeuvring checkerboard_pose_node --ros-args {' '.join(args)}"
-        self.run_in_background(cmd, "cb_pose")
+        self.run_in_terminal(cmd, "cb_pose")
 
     def run_robot_controller(self):
         cmd = "ros2 run ur5e_manoeuvring ur5e_cartesian_node"
-        self.run_in_background(cmd, "robot_ctrl")
+        self.run_in_terminal(cmd, "robot_ctrl")
 
     def run_game_controller(self):
         cmd = "ros2 run game_state_machine game_controller"
-        self.run_in_background(cmd, "game_ctrl")
+        self.run_in_terminal(cmd, "game_ctrl")
 
     def run_perception(self):
         yaml_path = self.e_yaml.get()
         cmd = f"ros2 run perception checkers_perception --ros-args --params-file {yaml_path}"
-        self.run_in_background(cmd, "perception")
+        self.run_in_terminal(cmd, "perception")
 
     def launch_rqt(self):
         cmd = "ros2 run rqt_image_view rqt_image_view /checkers/warped_view"
-        self.run_in_background(cmd, "rqt")
+        self.run_in_terminal(cmd, "rqt")
 
 
 if __name__ == "__main__":
