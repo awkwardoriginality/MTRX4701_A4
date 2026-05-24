@@ -76,8 +76,10 @@ class LaunchGUI:
         else:
             try:
                 subprocess.run(["wmctrl", "-c", name], check=True)
+            except FileNotFoundError:
+                messagebox.showerror("Missing Dependency", f"To close the '{name}' terminal on Linux, the 'wmctrl' tool is required.\nPlease run:\nsudo apt install wmctrl")
             except Exception as e:
-                messagebox.showerror("Kill Error", f"Failed to close terminal:\n{e}")
+                messagebox.showerror("Kill Error", f"Failed to close '{name}' terminal:\n{e}")
 
     def create_launch_kill(self, parent, text, launch_func, name):
         f = ttk.Frame(parent)
