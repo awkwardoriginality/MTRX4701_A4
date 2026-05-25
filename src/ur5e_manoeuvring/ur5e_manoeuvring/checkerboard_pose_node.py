@@ -5,6 +5,8 @@ import math
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+from builtin_interfaces.msg import Duration
 
 from std_msgs.msg import String, Bool
 from geometry_msgs.msg import PoseStamped
@@ -94,6 +96,12 @@ class CheckerboardPoseNode(Node):
             10,
         )
 
+        self.joint_traj_pub = self.create_publisher(
+            JointTrajectory,
+            "/scaled_joint_trajectory_controller/joint_trajectory",
+            10,
+        )
+
         self.retry_count = 0
         self.max_retries = 5
 
@@ -108,6 +116,8 @@ class CheckerboardPoseNode(Node):
         self.descent_target = None
         self.current_stage = None
         self.current_xyz = None
+        # in __init__
+        self.home_done_timer = None
 
         self.sub = self.create_subscription(
             String,
@@ -203,9 +213,9 @@ class CheckerboardPoseNode(Node):
             return
 
         if text in ["discard", "side"]:
-            self.get_logger().info("Discard command: moving BOARD WAYPOINT -> DISCARD")
+            self.get_logger().info("Discard command: moving directly to DISCARD")
             self.reset_motion_state()
-            self.send_joint_goal(self.board_waypoint_joint_deg, "waypoint_before_discard")
+            self.send_joint_goal(self.discard_joint_deg, "discard")
             return
 
         try:
@@ -224,7 +234,7 @@ class CheckerboardPoseNode(Node):
         # Only use the board centre waypoint when entering the board area
         # from home/discard/unknown. If we are already at a board square,
         # move directly from index to index.
-        if self.robot_location == "board":
+        if self.robot_location in ["board", "discard"]:
             self.get_logger().info(
                 f"Board command row={row}, col={col}: moving directly square -> square"
             )
@@ -410,6 +420,43 @@ class CheckerboardPoseNode(Node):
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(self.result_callback)
 
+    def send_home_rotate_only(self):
+        traj = JointTrajectory()
+        traj.joint_names = self.joint_names
+
+        point = JointTrajectoryPoint()
+
+        # Only shoulder_pan changes from -90 to -180.
+        # All other joints stay exactly at home_waypoint values.
+        point.positions = [
+            math.radians(-180.00),
+            math.radians(-80.00),
+            math.radians(-142.00),
+            math.radians(-227.00),
+            math.radians(-90.00),
+            math.radians(90.00),
+        ]
+
+        point.velocities = [0.0] * 6
+        point.time_from_start = Duration(sec=5, nanosec=0)
+
+        traj.points.append(point)
+
+        self.current_stage = "home_rotate_only"
+        self.joint_traj_pub.publish(traj)
+
+        self.get_logger().info("Published rotate-only HOME trajectory")
+
+        self.home_done_timer = self.create_timer(5.5, self.home_rotate_done_once)
+    
+    def home_rotate_done_once(self):
+        if self.home_done_timer is not None:
+            self.home_done_timer.cancel()
+            self.home_done_timer = None
+
+        self.robot_location = "home"
+        self.publish_motion_done(True)
+
     def result_callback(self, future):
         result = future.result().result
         error_code = result.error_code.val
@@ -425,8 +472,8 @@ class CheckerboardPoseNode(Node):
                 return
 
             if self.current_stage == "waypoint_before_home":
-                self.get_logger().info("Home waypoint reached. Moving to HOME.")
-                self.send_joint_goal(self.home_joint_deg, "home")
+                self.get_logger().info("Home waypoint reached. Rotating shoulder only to HOME.")
+                self.send_home_rotate_only()
                 return
 
             if self.current_stage == "home":
@@ -434,12 +481,6 @@ class CheckerboardPoseNode(Node):
 
             if self.current_stage == "board_waypoint":
                 self.robot_location = "board_waypoint"
-
-            if self.current_stage == "waypoint_before_discard":
-                self.robot_location = "board_waypoint"
-                self.get_logger().info("Discard waypoint reached. Moving to DISCARD.")
-                self.send_joint_goal(self.discard_joint_deg, "discard")
-                return
 
             if self.current_stage == "discard":
                 self.robot_location = "discard"
