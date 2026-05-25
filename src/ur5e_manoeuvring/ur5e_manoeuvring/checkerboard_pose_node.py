@@ -367,6 +367,17 @@ class CheckerboardPoseNode(Node):
         )
         request.goal_constraints = [constraints]
 
+        wrist2_constraint = JointConstraint()
+        wrist2_constraint.joint_name = "wrist_2_joint"
+        wrist2_constraint.position = math.radians(-90.0)
+        wrist2_constraint.tolerance_above = math.radians(5.0)
+        wrist2_constraint.tolerance_below = math.radians(5.0)
+        wrist2_constraint.weight = 1.0
+
+        path_constraints = Constraints()
+        path_constraints.joint_constraints = [wrist2_constraint]
+        request.path_constraints = path_constraints
+
         options = PlanningOptions()
         options.plan_only = False
         options.look_around = False
