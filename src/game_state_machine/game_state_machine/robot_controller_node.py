@@ -92,6 +92,7 @@ class RobotControllerNode(Node):
             self.sequence += [
                 ("arm", f"{mid_row} {mid_col}"),
                 ("arm", "lift"),
+                ("arm", "board_waypoint"),
             ]
 
         self.sequence += [

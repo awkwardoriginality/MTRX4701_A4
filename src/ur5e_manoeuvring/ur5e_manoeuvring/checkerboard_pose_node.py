@@ -187,6 +187,11 @@ class CheckerboardPoseNode(Node):
             self.send_lift_goal()
             return
 
+        if text in ["board_waypoint", "bwp"]:
+            self.get_logger().info("Board waypoint command: moving to BOARD WAYPOINT")
+            self.send_joint_goal(self.board_waypoint_joint_deg, "board_waypoint")
+            return
+
         if text in ["discard", "side"]:
             self.get_logger().info("Discard command: moving HOME WAYPOINT -> DISCARD")
             self.reset_motion_state()
@@ -317,7 +322,7 @@ class CheckerboardPoseNode(Node):
 
         sphere = SolidPrimitive()
         sphere.type = SolidPrimitive.SPHERE
-        sphere.dimensions = [0.001]
+        sphere.dimensions = [0.003]
 
         bv = BoundingVolume()
         bv.primitives = [sphere]
