@@ -367,6 +367,29 @@ class CheckerboardPoseNode(Node):
         )
         request.goal_constraints = [constraints]
 
+        # Keep the gripper pointing straight down throughout every motion.
+        # rpy(0, pi, 0) = gripper Z-axis pointing down.
+        # Tight roll/pitch tolerances, full yaw freedom.
+        frame_id = self.get_parameter("frame_id").value
+        eef_link = self.get_parameter("eef_link").value
+        qx, qy, qz, qw = self.rpy_to_quat(0.0, math.pi, 0.0)
+
+        vertical_oc = OrientationConstraint()
+        vertical_oc.header.frame_id = frame_id
+        vertical_oc.link_name = eef_link
+        vertical_oc.orientation.x = qx
+        vertical_oc.orientation.y = qy
+        vertical_oc.orientation.z = qz
+        vertical_oc.orientation.w = qw
+        vertical_oc.absolute_x_axis_tolerance = 0.1
+        vertical_oc.absolute_y_axis_tolerance = 0.1
+        vertical_oc.absolute_z_axis_tolerance = math.pi
+        vertical_oc.weight = 1.0
+
+        path_constraints = Constraints()
+        path_constraints.orientation_constraints = [vertical_oc]
+        request.path_constraints = path_constraints
+
         options = PlanningOptions()
         options.plan_only = False
         options.look_around = False
