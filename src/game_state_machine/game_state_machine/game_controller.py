@@ -215,8 +215,8 @@ class GameController(Node):
                 return
 
             self.board_before_human = self.current_board.copy()
-
-            self.publish_status("Ready to play. Make your move.", say=True)
+            self.play_wav("/home/eashan-garg/GLaDOSWelcoming.wav")
+            self.publish_status("Ready to play. Make your move.")
 
             self.state = "WAIT_HUMAN_MOVE"
             return
@@ -234,8 +234,9 @@ class GameController(Node):
 
             self.board_after_human = self.current_board.copy()
 
+            self.play_wav("/home/eashan-garg/GLaDOS-819170.wav")
             self.publish_status(
-                "Human move detected. Robot turn starting.", say=True
+                "Human move detected. Robot turn starting."
             )
 
             self.robot_done = False
@@ -300,11 +301,13 @@ class GameController(Node):
 
                 self.state = "ROBOT_MOVE_FAILED"
                 return
-
+            
+            self.play_wav("/home/eashan-garg/GLaDOS-819165.wav")
             self.publish_status(
                 "Robot move verified. "
-                "Ready to play. Make your move.", say=True
+                "Ready to play. Make your move."
             )
+
 
             self.robot_retry_count = 0
 
@@ -346,6 +349,14 @@ class GameController(Node):
 
         if self.state == "MANUAL_RESET_REQUIRED":
             return
+        
+    def play_wav(self, wav_path):
+        subprocess.Popen(
+            [
+                "aplay",
+                wav_path
+            ]
+        )
 
 
 def main(args=None):
