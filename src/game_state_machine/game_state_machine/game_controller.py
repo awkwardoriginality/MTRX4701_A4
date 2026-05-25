@@ -144,10 +144,20 @@ class GameController(Node):
             r, c_eng = INTERNAL_TO_ROWCOL[sq]
             captured.append((r, 7 - c_eng))
 
+        # Compute intermediate landing squares for multi-jumps.
+        # path_squares is not populated by the engine, so we derive them:
+        # landing after each jump = current + 2*(captured - current).
+        # For N captures there are N-1 intermediate landings.
         path = []
-        for sq in move.path_squares[1:-1]:
-            r, c_eng = INTERNAL_TO_ROWCOL[sq]
-            path.append((r, 7 - c_eng))
+        if len(move.captured_squares) > 1:
+            cur_r, cur_c = INTERNAL_TO_ROWCOL[move.from_sq]
+            for cap_sq in move.captured_squares[:-1]:
+                cap_r, cap_c = INTERNAL_TO_ROWCOL[cap_sq]
+                land_r = cur_r + 2 * (cap_r - cur_r)
+                land_c = cur_c + 2 * (cap_c - cur_c)
+                path.append((land_r, 7 - land_c))
+                cur_r = land_r
+                cur_c = land_c
 
         return (from_row, 7 - from_col_eng), (to_row, 7 - to_col_eng), captured, path
 
