@@ -3,6 +3,7 @@
 import json
 import rclpy
 from rclpy.node import Node
+import subprocess
 
 from std_msgs.msg import Int32MultiArray, Bool, String
 from .game_engine.board import (
@@ -95,11 +96,26 @@ class GameController(Node):
             self.publish_status("ERROR: Robot controller reported failure.")
             self.state = "ROBOT_MOVE_FAILED"
 
-    def publish_status(self, text):
+    def publish_status(self, text, say=False):
         msg = String()
         msg.data = text
+
         self.status_pub.publish(msg)
         self.get_logger().info(text)
+
+        if say:
+            self.speak(text)
+
+    def speak(self, text):
+        subprocess.Popen(
+            [
+                "espeak",
+                "-ven+f3",
+                "-s", "150",
+                "-p", "50",
+                text
+            ]
+        )
 
     def boards_equal(self, a, b):
         return a == b
@@ -200,7 +216,7 @@ class GameController(Node):
 
             self.board_before_human = self.current_board.copy()
 
-            self.publish_status("Ready to play. Make your move.")
+            self.publish_status("Ready to play. Make your move.", say=True)
 
             self.state = "WAIT_HUMAN_MOVE"
             return
@@ -219,7 +235,7 @@ class GameController(Node):
             self.board_after_human = self.current_board.copy()
 
             self.publish_status(
-                "Human move detected. Robot turn starting."
+                "Human move detected. Robot turn starting.", say=True
             )
 
             self.robot_done = False
@@ -287,7 +303,7 @@ class GameController(Node):
 
             self.publish_status(
                 "Robot move verified. "
-                "Ready to play. Make your move."
+                "Ready to play. Make your move.", say=True
             )
 
             self.robot_retry_count = 0

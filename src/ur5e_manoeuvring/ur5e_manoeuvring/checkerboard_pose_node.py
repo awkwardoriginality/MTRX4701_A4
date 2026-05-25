@@ -341,7 +341,7 @@ class CheckerboardPoseNode(Node):
 
         sphere = SolidPrimitive()
         sphere.type = SolidPrimitive.SPHERE
-        sphere.dimensions = [0.005]
+        sphere.dimensions = [0.003]
 
         bv = BoundingVolume()
         bv.primitives = [sphere]
@@ -357,9 +357,9 @@ class CheckerboardPoseNode(Node):
         oc.header.frame_id = frame_id
         oc.link_name = eef_link
         oc.orientation = pose.pose.orientation
-        oc.absolute_x_axis_tolerance = 0.05
-        oc.absolute_y_axis_tolerance = 0.05
-        oc.absolute_z_axis_tolerance = 3.14
+        oc.absolute_x_axis_tolerance = 0.03
+        oc.absolute_y_axis_tolerance = 0.03
+        oc.absolute_z_axis_tolerance = 0.05
         oc.weight = 1.0
 
         constraints = Constraints()
