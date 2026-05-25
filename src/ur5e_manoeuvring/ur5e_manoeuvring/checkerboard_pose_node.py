@@ -102,6 +102,7 @@ class CheckerboardPoseNode(Node):
         self.last_joint_target = None
 
         self.pending_board_target = None
+        self.robot_location = "unknown"
 
         self.hover_target = None
         self.descent_target = None
@@ -178,9 +179,18 @@ class CheckerboardPoseNode(Node):
         text = msg.data.strip().lower()
 
         if text in ["home", "upright", "back", "return"]:
-            self.get_logger().info("Home command: moving HOME WAYPOINT -> HOME")
+            self.get_logger().info("Home command received")
             self.reset_motion_state()
-            self.send_joint_goal(self.home_waypoint_joint_deg, "waypoint_before_home")
+
+            # If we are coming from the board/discard area, go through the
+            # board centre waypoint first. If already home/unknown, use the
+            # normal home waypoint directly.
+            if self.robot_location in ["board", "discard", "board_waypoint"]:
+                self.get_logger().info("Moving BOARD WAYPOINT -> HOME WAYPOINT -> HOME")
+                self.send_joint_goal(self.board_waypoint_joint_deg, "board_waypoint_before_home")
+            else:
+                self.get_logger().info("Moving HOME WAYPOINT -> HOME")
+                self.send_joint_goal(self.home_waypoint_joint_deg, "waypoint_before_home")
             return
 
         if text in ["lift", "raise", "up"]:
@@ -193,7 +203,7 @@ class CheckerboardPoseNode(Node):
             return
 
         if text in ["discard", "side"]:
-            self.get_logger().info("Discard command: moving HOME WAYPOINT -> DISCARD")
+            self.get_logger().info("Discard command: moving BOARD WAYPOINT -> DISCARD")
             self.reset_motion_state()
             self.send_joint_goal(self.board_waypoint_joint_deg, "waypoint_before_discard")
             return
@@ -211,11 +221,20 @@ class CheckerboardPoseNode(Node):
         self.pending_board_target = (row, col)
         self.retry_count = 0
 
-        self.get_logger().info(
-            f"Board command row={row}, col={col}: moving BOARD WAYPOINT -> square"
-        )
-
-        self.send_joint_goal(self.board_waypoint_joint_deg, "waypoint_before_board")
+        # Only use the board centre waypoint when entering the board area
+        # from home/discard/unknown. If we are already at a board square,
+        # move directly from index to index.
+        if self.robot_location == "board":
+            self.get_logger().info(
+                f"Board command row={row}, col={col}: moving directly square -> square"
+            )
+            self.pending_board_target = None
+            self.prepare_board_motion(row, col)
+        else:
+            self.get_logger().info(
+                f"Board command row={row}, col={col}: moving BOARD WAYPOINT -> square"
+            )
+            self.send_joint_goal(self.board_waypoint_joint_deg, "waypoint_before_board")
 
     def prepare_board_motion(self, row, col):
         ox = float(self.get_parameter("origin_x").value)
@@ -322,7 +341,7 @@ class CheckerboardPoseNode(Node):
 
         sphere = SolidPrimitive()
         sphere.type = SolidPrimitive.SPHERE
-        sphere.dimensions = [0.003]
+        sphere.dimensions = [0.005]
 
         bv = BoundingVolume()
         bv.primitives = [sphere]
@@ -399,17 +418,34 @@ class CheckerboardPoseNode(Node):
             self.get_logger().info(f"Move completed successfully: {self.current_stage}")
             self.retry_count = 0
 
+            if self.current_stage == "board_waypoint_before_home":
+                self.robot_location = "board_waypoint"
+                self.get_logger().info("Board waypoint reached. Moving to HOME WAYPOINT.")
+                self.send_joint_goal(self.home_waypoint_joint_deg, "waypoint_before_home")
+                return
+
             if self.current_stage == "waypoint_before_home":
                 self.get_logger().info("Home waypoint reached. Moving to HOME.")
                 self.send_joint_goal(self.home_joint_deg, "home")
                 return
 
+            if self.current_stage == "home":
+                self.robot_location = "home"
+
+            if self.current_stage == "board_waypoint":
+                self.robot_location = "board_waypoint"
+
             if self.current_stage == "waypoint_before_discard":
+                self.robot_location = "board_waypoint"
                 self.get_logger().info("Discard waypoint reached. Moving to DISCARD.")
                 self.send_joint_goal(self.discard_joint_deg, "discard")
                 return
 
+            if self.current_stage == "discard":
+                self.robot_location = "discard"
+
             if self.current_stage == "waypoint_before_board":
+                self.robot_location = "board_waypoint"
                 if self.pending_board_target is not None:
                     row, col = self.pending_board_target
                     self.pending_board_target = None
@@ -426,6 +462,9 @@ class CheckerboardPoseNode(Node):
 
                 self.send_moveit_pose_goal(x, y, z)
                 return
+
+            if self.current_stage in ["descent", "lift", "hover"]:
+                self.robot_location = "board"
 
             self.publish_motion_done(True)
             return
