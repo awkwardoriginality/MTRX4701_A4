@@ -6,6 +6,8 @@ from click import command
 import rclpy
 import subprocess
 from rclpy.node import Node
+import random
+import os
 
 from std_msgs.msg import String, Bool
 
@@ -106,17 +108,20 @@ class RobotControllerNode(Node):
         for i, cap in enumerate(captured):
             cap_row, cap_col = int(cap[0]), int(cap[1])
 
+            self.sequence += [
+                ("arm", f"{cap_row} {cap_col}"),
+            ]
+
             if i == 0:
                 self.sequence.append(("wav", "single_take"))
             else:
                 self.sequence.append(("wav", "multiple_take"))
 
             self.sequence += [
-                ("arm", f"{cap_row} {cap_col}"),
                 ("gripper", "close"),
                 ("arm", "lift"),
-                ("wav", "discard"),
                 ("arm", "discard"),
+                ("wav", "discard"),
                 ("gripper", "open"),
             ]
 
@@ -157,27 +162,16 @@ class RobotControllerNode(Node):
             msg.data = command
             self.gripper_pub.publish(msg)
             self.waiting_for = "gripper"
-
-        elif command_type == "wav":
-            if command == "single_take":
-                self.play_wav("/home/eashan-garg/GLaDOS-819196.wav")
-
-            elif command == "multiple_take":
-                self.play_wav("/home/eashan-garg/GLaDOS-819177.wav")
-
-            self.step_index += 1
-            self.run_next_step()
-            return
         
         elif command_type == "wav":
             if command == "single_take":
-                self.play_wav("/home/eashan-garg/GLaDOS-819179.wav")
+                self.play_wav("/home/eashan-garg/glados/ill_take_that.wav")
 
             elif command == "multiple_take":
-                self.play_wav("/home/eashan-garg/GLaDOS-819167.wav")
+                self.play_wav("/home/eashan-garg/glados/and_that_one_too.wav")
 
             elif command == "discard":
-                self.play_wav("/home/eashan-garg/GLaDOS-819185.wav")
+                self.play_wav("/home/eashan-garg/glados/trash.wav")
 
             self.step_index += 1
             self.run_next_step()

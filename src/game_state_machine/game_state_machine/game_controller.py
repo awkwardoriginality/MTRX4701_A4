@@ -215,7 +215,7 @@ class GameController(Node):
                 return
 
             self.board_before_human = self.current_board.copy()
-            self.play_wav("/home/eashan-garg/GLaDOSWelcoming.wav")
+            self.play_wav("/home/eashan-garg/glados/welcome.wav")
             self.publish_status("Ready to play. Make your move.")
 
             self.state = "WAIT_HUMAN_MOVE"
@@ -234,7 +234,7 @@ class GameController(Node):
 
             self.board_after_human = self.current_board.copy()
 
-            self.play_wav("/home/eashan-garg/GLaDOS-819170.wav")
+            self.play_wav("/home/eashan-garg/glados/robot_turn.wav")
             self.publish_status(
                 "Human move detected. Robot turn starting."
             )
@@ -302,7 +302,7 @@ class GameController(Node):
                 self.state = "ROBOT_MOVE_FAILED"
                 return
             
-            self.play_wav("/home/eashan-garg/GLaDOS-819165.wav")
+            self.play_wav("/home/eashan-garg/glados/your_turn.wav")
             self.publish_status(
                 "Robot move verified. "
                 "Ready to play. Make your move."
