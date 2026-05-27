@@ -8,6 +8,7 @@ import subprocess
 from rclpy.node import Node
 import random
 import os
+from ament_index_python.packages import get_package_share_directory
 
 from std_msgs.msg import String, Bool
 
@@ -59,6 +60,11 @@ class RobotControllerNode(Node):
         self.sequence = []
         self.step_index = 0
         self.waiting_for = None
+        self.single_take_queue = []
+        self.multiple_take_queue = []
+        self.discard_queue = []
+        self.package_path = get_package_share_directory("game_state_machine")
+        self.glados_path = os.path.join(self.package_path, "glados_folders")
 
         self.get_logger().info("Robot controller ready")
         self.get_logger().info(
@@ -164,14 +170,63 @@ class RobotControllerNode(Node):
             self.waiting_for = "gripper"
         
         elif command_type == "wav":
+
             if command == "single_take":
-                self.play_wav("/home/eashan-garg/glados/ill_take_that.wav")
+
+                single_folder = discard_folder = os.path.join(self.glados_path, "single_take")
+
+                single_files = [
+                    os.path.join(single_folder, f)
+                    for f in os.listdir(single_folder)
+                    if f.lower().endswith(".wav")
+                    and not f.startswith("._")
+                ]
+
+                if not self.single_take_queue:
+                    self.single_take_queue = single_files[:]
+                    random.shuffle(self.single_take_queue)
+
+                random_clip = self.single_take_queue.pop()
+
+                self.play_wav(random_clip)
 
             elif command == "multiple_take":
-                self.play_wav("/home/eashan-garg/glados/and_that_one_too.wav")
+
+                multiple_folder = os.path.join(self.glados_path, "multiple_take")
+
+                multiple_files = [
+                    os.path.join(multiple_folder, f)
+                    for f in os.listdir(multiple_folder)
+                    if f.lower().endswith(".wav")
+                    and not f.startswith("._")
+                ]
+
+                if not self.multiple_take_queue:
+                    self.multiple_take_queue = multiple_files[:]
+                    random.shuffle(self.multiple_take_queue)
+
+                random_clip = self.multiple_take_queue.pop()
+
+                self.play_wav(random_clip)
 
             elif command == "discard":
-                self.play_wav("/home/eashan-garg/glados/trash.wav")
+
+                discard_folder = os.path.join(self.glados_path, "discard")
+
+                discard_files = [
+                    os.path.join(discard_folder, f)
+                    for f in os.listdir(discard_folder)
+                    if f.lower().endswith(".wav")
+                    and not f.startswith("._")
+                ]
+
+                if not self.discard_queue:
+                    self.discard_queue = discard_files[:]
+                    random.shuffle(self.discard_queue)
+
+                random_clip = self.discard_queue.pop()
+
+                self.play_wav(random_clip)
 
             self.step_index += 1
             self.run_next_step()

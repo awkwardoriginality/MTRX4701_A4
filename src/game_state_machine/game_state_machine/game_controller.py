@@ -4,6 +4,9 @@ import json
 import rclpy
 from rclpy.node import Node
 import subprocess
+import os
+import random
+from ament_index_python.packages import get_package_share_directory
 
 from std_msgs.msg import Int32MultiArray, Bool, String
 from .game_engine.board import (
@@ -65,6 +68,10 @@ class GameController(Node):
         self.max_robot_retries = 2
 
         self.last_robot_move = None
+        self.robot_turn_queue = []
+        self.human_turn_queue = []
+        self.package_path = get_package_share_directory("game_state_machine")
+        self.glados_path = os.path.join(self.package_path, "glados_folders")
 
         self.search = Search(max_time=3.0)
 
@@ -215,7 +222,7 @@ class GameController(Node):
                 return
 
             self.board_before_human = self.current_board.copy()
-            self.play_wav("/home/eashan-garg/glados/welcome.wav")
+            self.play_wav(os.path.join(self.glados_path, "welcoming.wav"))
             self.publish_status("Ready to play. Make your move.")
 
             self.state = "WAIT_HUMAN_MOVE"
@@ -234,7 +241,10 @@ class GameController(Node):
 
             self.board_after_human = self.current_board.copy()
 
-            self.play_wav("/home/eashan-garg/glados/robot_turn.wav")
+            self.play_random_from_folder(
+                os.path.join(self.glados_path, "robot_turn"),
+                "robot_turn_queue"
+            )
             self.publish_status(
                 "Human move detected. Robot turn starting."
             )
@@ -302,7 +312,10 @@ class GameController(Node):
                 self.state = "ROBOT_MOVE_FAILED"
                 return
             
-            self.play_wav("/home/eashan-garg/glados/your_turn.wav")
+            self.play_random_from_folder(
+                os.path.join(self.glados_path, "human_turn"),
+                "human_turn_queue"
+            )
             self.publish_status(
                 "Robot move verified. "
                 "Ready to play. Make your move."
@@ -357,6 +370,28 @@ class GameController(Node):
                 wav_path
             ]
         )
+
+    def play_random_from_folder(self, folder, queue_name):
+        wav_files = [
+            os.path.join(folder, f)
+            for f in os.listdir(folder)
+            if f.lower().endswith(".wav")
+            and not f.startswith("._")
+        ]
+
+        if not wav_files:
+            self.get_logger().warn(f"No wav files found in {folder}")
+            return
+
+        queue = getattr(self, queue_name)
+
+        if not queue:
+            queue = wav_files[:]
+            random.shuffle(queue)
+            setattr(self, queue_name, queue)
+
+        random_clip = queue.pop()
+        self.play_wav(random_clip)
 
 
 def main(args=None):
