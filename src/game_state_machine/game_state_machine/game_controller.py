@@ -240,15 +240,15 @@ class GameController(Node):
                 return
 
             self.board_after_human = self.current_board.copy()
-            finished, message = self.check_game_finished(self.board_after_human)
+            finished, winner, message = self.check_game_finished(self.board_after_human)
 
             if finished:
-                self.play_wav(
-                    os.path.join(self.glados_path, "human_wins.wav")
-                )
+                if winner == "robot":
+                    self.play_wav(os.path.join(self.glados_path, "robot_wins.wav"))
+                elif winner == "human":
+                    self.play_wav(os.path.join(self.glados_path, "human_wins.wav"))
 
                 self.publish_status(message)
-
                 self.state = "GAME_FINISHED"
                 return
 
@@ -309,16 +309,15 @@ class GameController(Node):
                 return
 
             self.board_after_robot = self.current_board.copy()
-
-            finished, message = self.check_game_finished(self.board_after_robot)
+            finished, winner, message = self.check_game_finished(self.board_after_robot)
 
             if finished:
-                self.play_wav(
-                    os.path.join(self.glados_path, "robot_wins.wav")
-                )
+                if winner == "robot":
+                    self.play_wav(os.path.join(self.glados_path, "robot_wins.wav"))
+                elif winner == "human":
+                    self.play_wav(os.path.join(self.glados_path, "human_wins.wav"))
 
                 self.publish_status(message)
-
                 self.state = "GAME_FINISHED"
                 return
 
@@ -424,12 +423,12 @@ class GameController(Node):
         robot_count = sum(1 for v in board if v == 2)
 
         if human_count == 0:
-            return True, "Game over. Robot wins."
+            return True, "robot", "Game over. Robot wins."
 
         if robot_count == 0:
-            return True, "Game over. Human wins."
+            return True, "human", "Game over. Human wins."
 
-        return False, ""
+        return False, None, ""
 
 
 def main(args=None):
