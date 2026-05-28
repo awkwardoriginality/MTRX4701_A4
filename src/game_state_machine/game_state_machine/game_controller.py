@@ -240,6 +240,17 @@ class GameController(Node):
                 return
 
             self.board_after_human = self.current_board.copy()
+            finished, message = self.check_game_finished(self.board_after_human)
+
+            if finished:
+                self.play_wav(
+                    os.path.join(self.glados_path, "human_wins.wav")
+                )
+
+                self.publish_status(message)
+
+                self.state = "GAME_FINISHED"
+                return
 
             self.play_random_from_folder(
                 os.path.join(self.glados_path, "robot_turn"),
@@ -298,6 +309,18 @@ class GameController(Node):
                 return
 
             self.board_after_robot = self.current_board.copy()
+
+            finished, message = self.check_game_finished(self.board_after_robot)
+
+            if finished:
+                self.play_wav(
+                    os.path.join(self.glados_path, "robot_wins.wav")
+                )
+
+                self.publish_status(message)
+
+                self.state = "GAME_FINISHED"
+                return
 
             if self.boards_equal(
                 self.board_after_human,
@@ -363,6 +386,9 @@ class GameController(Node):
         if self.state == "MANUAL_RESET_REQUIRED":
             return
         
+        if self.state == "GAME_FINISHED":
+            return
+        
     def play_wav(self, wav_path):
         subprocess.Popen(
             [
@@ -392,6 +418,18 @@ class GameController(Node):
 
         random_clip = queue.pop()
         self.play_wav(random_clip)
+
+    def check_game_finished(self, board):
+        human_count = sum(1 for v in board if v == 1)
+        robot_count = sum(1 for v in board if v == 2)
+
+        if human_count == 0:
+            return True, "Game over. Robot wins."
+
+        if robot_count == 0:
+            return True, "Game over. Human wins."
+
+        return False, ""
 
 
 def main(args=None):
